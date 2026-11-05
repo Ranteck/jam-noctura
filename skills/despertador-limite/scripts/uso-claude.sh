@@ -15,10 +15,11 @@ if [ -z "$token" ]; then
     exit 1
 fi
 
-if ! response=$(curl -sS --fail --max-time 10 \
+# El token va por stdin para que no quede en argv (visible en /proc/*/cmdline).
+if ! response=$(printf 'Authorization: Bearer %s\n' "$token" | curl -sS --fail --max-time 10 \
+    -H @- \
     -H "Accept: application/json" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $token" \
     -H "anthropic-beta: oauth-2025-04-20" \
     -H "User-Agent: claude-code/2.1.34" \
     "https://api.anthropic.com/api/oauth/usage" 2>/dev/null); then
