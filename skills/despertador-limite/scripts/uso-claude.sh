@@ -1,0 +1,71 @@
+#!/bin/bash
+set -euo pipefail
+
+config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+creds_file="${config_dir}/.credentials.json"
+
+if [ ! -f "$creds_file" ]; then
+    echo "Error: no existe el archivo de credenciales en $creds_file" >&2
+    exit 1
+fi
+
+token=$(jq -r '.claudeAiOauth.accessToken // empty' "$creds_file" 2>/dev/null || true)
+if [ -z "$token" ]; then
+    echo "Error: no se encontró accessToken en $creds_file" >&2
+    exit 1
+fi
+
+if ! response=$(curl -sS --fail --max-time 10 \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $token" \
+    -H "anthropic-beta: oauth-2025-04-20" \
+    -H "User-Agent: claude-code/2.1.34" \
+    "https://api.anthropic.com/api/oauth/usage" 2>/dev/null); then
+    echo "Error: falló la consulta a la API de uso de Anthropic" >&2
+    exit 1
+fi
+
+if ! echo "$response" | jq -e '.five_hour and .seven_day' >/dev/null 2>&1; then
+    echo "Error: respuesta inválida o sin datos de rate limit de Anthropic" >&2
+    exit 1
+fi
+
+five_hour_util=$(echo "$response" | jq -r '.five_hour.utilization // empty')
+five_hour_reset_utc=$(echo "$response" | jq -r '.five_hour.resets_at // empty')
+seven_day_util=$(echo "$response" | jq -r '.seven_day.utilization // empty')
+seven_day_reset_utc=$(echo "$response" | jq -r '.seven_day.resets_at // empty')
+
+if [ -z "$five_hour_util" ] || [ -z "$five_hour_reset_utc" ] || [ -z "$seven_day_util" ] || [ -z "$seven_day_reset_utc" ]; then
+    echo "Error: datos incompletos en la respuesta de uso de Anthropic" >&2
+    exit 1
+fi
+
+if ! five_hour_reset_local=$(date -d "$five_hour_reset_utc" --iso-8601=seconds 2>/dev/null); then
+    echo "Error: formato de fecha inválido en five_hour.resets_at: $five_hour_reset_utc" >&2
+    exit 1
+fi
+
+if ! seven_day_reset_local=$(date -d "$seven_day_reset_utc" --iso-8601=seconds 2>/dev/null); then
+    echo "Error: formato de fecha inválido en seven_day.resets_at: $seven_day_reset_utc" >&2
+    exit 1
+fi
+
+five_pct=$(echo "$five_hour_util" | jq 'round')
+sev_pct=$(echo "$seven_day_util" | jq 'round')
+
+jq -n \
+    --argjson five_pct "$five_pct" \
+    --arg five_reset "$five_hour_reset_local" \
+    --argjson sev_pct "$sev_pct" \
+    --arg sev_reset "$seven_day_reset_local" \
+    '{
+        cinco_horas: {
+            pct: $five_pct,
+            reset: $five_reset
+        },
+        semanal: {
+            pct: $sev_pct,
+            reset: $sev_reset
+        }
+    }'
