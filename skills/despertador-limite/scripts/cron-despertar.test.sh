@@ -52,16 +52,6 @@ assert_eq "R05: aviso semanal 'Nov 12, 2:10 PM' -> 22 14 12 11 *" "22 14 12 11 *
 salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "Nov 12th, 2026 4:50 PM")
 assert_eq "R05: aviso semanal 'Nov 12th, 2026 4:50 PM' -> 2 17 12 11 *" "2 17 12 11 *" "$salida"
 
-# Fecha sin año pasada va al año siguiente
-EPOCH_20DEC=$(TZ="$TZ" date -d "2026-12-20 10:00:00" +%s)
-epoch_jan3=$(AHORA_EPOCH="$EPOCH_20DEC" "$CRON_DESPERTAR" --epoch "Jan 3 5am")
-fecha_jan3=$(TZ="$TZ" date -d "@$epoch_jan3" +"%d/%m/%Y %H:%M")
-assert_eq "Jan 3 5am desde 20/12/2026 -> 03/01/2027 05:12" "03/01/2027 05:12" "$fecha_jan3"
-
-epoch_dec21=$(AHORA_EPOCH="$EPOCH_20DEC" "$CRON_DESPERTAR" --epoch "Dec 21 5am")
-fecha_dec21=$(TZ="$TZ" date -d "@$epoch_dec21" +"%d/%m/%Y %H:%M")
-assert_eq "Dec 21 5am desde 20/12/2026 -> 21/12/2026 05:12" "21/12/2026 05:12" "$fecha_dec21"
-
 # 4. Hora suelta que ya pasó ("3am" desde las 09:00) con margen 15 -> mañana 03:15
 salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "3am" 15)
 assert_eq "hora suelta pasada '3am' con margen 15 -> 15 3 6 11 *" "15 3 6 11 *" "$salida"

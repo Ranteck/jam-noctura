@@ -1,17 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-mostrar_epoch=0
-if [ "${1:-}" = "--epoch" ]; then
-    mostrar_epoch=1
-    shift
-fi
-if [ "${MOSTRAR_EPOCH:-0}" = "1" ]; then
-    mostrar_epoch=1
-fi
-
 if [ "$#" -lt 1 ]; then
-    echo "Uso: $(basename "$0") [--epoch] <hora> [margen_min=12]" >&2
+    echo "Uso: $(basename "$0") <hora> [margen_min=12]" >&2
     exit 1
 fi
 
@@ -39,10 +30,7 @@ fi
 
 if [ "$es_fecha" -eq 1 ]; then
     candidate="$cleaned"
-    has_year=0
-    if [[ "$candidate" =~ [0-9]{4} ]]; then
-        has_year=1
-    else
+    if ! [[ "$candidate" =~ [0-9]{4} ]]; then
         candidate="$candidate $year_now"
     fi
     if ! epoch=$(date -d "$candidate" +%s 2>/dev/null); then
@@ -57,18 +45,6 @@ if [ "$es_fecha" -eq 1 ]; then
         epoch=$(( (epoch / 60 + 1) * 60 ))
     fi
     epoch=$(( epoch + 10#$margen_min * 60 ))
-
-    # Si la entrada no trae año y el resultado queda antes de ahora, usar año+1
-    if [ "$has_year" -eq 0 ] && [ "$epoch" -le "$now_epoch" ]; then
-        candidate="$cleaned $((year_now + 1))"
-        epoch=$(date -d "$candidate" +%s 2>/dev/null)
-        sec=$(date -d "$candidate" +%S 2>/dev/null)
-        nsec=$(date -d "$candidate" +%N 2>/dev/null)
-        if [ "$((10#$sec))" -gt 0 ] || [[ "$nsec" =~ [1-9] ]]; then
-            epoch=$(( (epoch / 60 + 1) * 60 ))
-        fi
-        epoch=$(( epoch + 10#$margen_min * 60 ))
-    fi
 else
     today_date=$(date -d "@$now_epoch" +%Y-%m-%d 2>/dev/null)
     if ! epoch=$(date -d "$today_date $cleaned" +%s 2>/dev/null); then
@@ -99,9 +75,5 @@ else
     fi
 fi
 
-if [ "$mostrar_epoch" -eq 1 ]; then
-    echo "$epoch"
-else
-    # Salida en formato cron local: M H D Mon *
-    date -d "@$epoch" +"%-M %-H %-d %-m *"
-fi
+# Salida en formato cron local: M H D Mon *
+date -d "@$epoch" +"%-M %-H %-d %-m *"
