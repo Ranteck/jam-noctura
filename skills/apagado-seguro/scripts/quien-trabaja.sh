@@ -22,61 +22,78 @@ clasificar() {
   local lower_preview
   lower_preview=$(tr "[:upper:]" "[:lower:]" <<< "$preview" | tr '\r\n\t' ' ' | tr -s ' ')
 
-  local has_limit_phrase=0
-  for phrase in "try again at" "limit reached" "hit your limit" "hit your usage limit"; do
-    if [[ "$lower_preview" == *"$phrase"* ]]; then
-      has_limit_phrase=1
-      break
+  local phrases=("try again at" "limit reached" "hit your limit" "hit your usage limit")
+  local max_idx=-1
+  local tail=""
+
+  for p in "${phrases[@]}"; do
+    if [[ "$lower_preview" == *"$p"* ]]; then
+      local pre="${lower_preview%$p*}"
+      local idx="${#pre}"
+      if (( idx > max_idx )); then
+        max_idx=$idx
+        tail="${lower_preview:idx}"
+      fi
     fi
   done
 
-  if [[ $has_limit_phrase -eq 1 ]]; then
-    local months="jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december"
-    local time_pattern="(try again at|resets at|reset at|resets)[ :·•\t]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]*([0-9]{4}))?[,]?[ ]+)?([0-9]{1,2}(:[0-9]{2})?([ ]*(am|pm))?|[0-9]{1,2}:[0-9]{2})"
+  if [[ -n "$tail" ]]; then
+    local after_anchor=""
+    if [[ "$tail" == "try again at"* ]]; then
+      after_anchor="${tail#try again at}"
+    else
+      local first30="${tail:0:30}"
+      if [[ "$first30" =~ (resets at|reset at|resets) ]]; then
+        local kw="${BASH_REMATCH[1]}"
+        local pre="${first30%%"$kw"*}"
+        local offset=$(( ${#pre} + ${#kw} ))
+        after_anchor="${tail:offset}"
+      fi
+    fi
 
-    local search_text="$lower_preview"
-    if [[ "$lower_preview" == *"try again at"* ]]; then
-      search_text="try again at${lower_preview##*try again at}"
+    local months="jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december"
+    local date_time_pattern="^[ :·•\t,.:-]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]+([0-9]{4}))?([,]?[ ]*(at)?[ ]+))?([0-9]{1,2}:[0-9]{2}([ ]*(am|pm))?|[0-9]{1,2}[ ]*(am|pm))"
+
+    local base="$ultima_salida"
+    if (( base <= 0 )); then
+      base="$ahora"
     fi
 
     local reset_epoch=""
-    if [[ "$search_text" =~ $time_pattern ]]; then
+    if [[ -n "$after_anchor" && "$after_anchor" =~ $date_time_pattern ]]; then
       local month="${BASH_REMATCH[3]}"
-      local day="${BASH_REMATCH[5]}"
-      local year="${BASH_REMATCH[8]}"
-      local hora="${BASH_REMATCH[9]}"
+      local day="${BASH_REMATCH[4]}"
+      local year="${BASH_REMATCH[7]}"
+      local hora="${BASH_REMATCH[10]}"
 
       if [[ -n "$month" && -n "$day" ]]; then
-        # Con fecha: reset = esa fecha y hora (año de ultima_salida; si queda antes de ultima_salida, año siguiente).
-        # Si viene año opcional, se usa ese.
         if [[ -n "$year" ]]; then
           reset_epoch=$(date -d "$month $day $year $hora" +%s 2>/dev/null || true)
-        elif [[ "$ultima_salida" -gt 0 ]]; then
-          local year_salida
-          year_salida=$(date -d "@$ultima_salida" +%Y 2>/dev/null || true)
-          if [[ -n "$year_salida" ]]; then
-            reset_epoch=$(date -d "$month $day $year_salida $hora" +%s 2>/dev/null || true)
-            if [[ -n "$reset_epoch" ]] && (( reset_epoch < ultima_salida )); then
-              reset_epoch=$(date -d "$month $day $((year_salida + 1)) $hora" +%s 2>/dev/null || true)
+        else
+          local year_base
+          year_base=$(date -d "@$base" +%Y 2>/dev/null || true)
+          if [[ -n "$year_base" ]]; then
+            reset_epoch=$(date -d "$month $day $year_base $hora" +%s 2>/dev/null || true)
+            if [[ -n "$reset_epoch" ]] && (( reset_epoch < base )); then
+              reset_epoch=$(date -d "$month $day $((year_base + 1)) $hora" +%s 2>/dev/null || true)
             fi
           fi
         fi
-      elif [[ -n "$hora" && "$ultima_salida" -gt 0 ]]; then
-        # Sin fecha: comportamiento actual (día de ultima_salida, +1 día si queda <=).
-        local date_salida
-        date_salida=$(date -d "@$ultima_salida" +%Y-%m-%d 2>/dev/null || true)
-        if [[ -n "$date_salida" ]]; then
-          reset_epoch=$(date -d "$date_salida $hora" +%s 2>/dev/null || true)
-          if [[ -n "$reset_epoch" ]] && (( reset_epoch <= ultima_salida )); then
+      elif [[ -n "$hora" ]]; then
+        local date_base
+        date_base=$(date -d "@$base" +%Y-%m-%d 2>/dev/null || true)
+        if [[ -n "$date_base" ]]; then
+          reset_epoch=$(date -d "$date_base $hora" +%s 2>/dev/null || true)
+          if [[ -n "$reset_epoch" ]] && (( reset_epoch <= base )); then
             reset_epoch=$(( reset_epoch + 86400 ))
           fi
         fi
       fi
     fi
 
-    # Si no se puede leer la hora, reset = ultima_salida + 5 h.
+    # Si no se puede leer la hora, fallback = base + 5 h.
     if [[ -z "$reset_epoch" ]]; then
-      reset_epoch=$(( ultima_salida + 5 * 3600 ))
+      reset_epoch=$(( base + 5 * 3600 ))
     fi
 
     # esperando-reset si ahora < reset + 15 min; si no, libre (ya debería haber vuelto: nadie lo va a retomar).

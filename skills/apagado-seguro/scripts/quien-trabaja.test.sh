@@ -111,6 +111,35 @@ preview_mixto=$'5h 30% resets 14:00\nYou have hit your usage limit. Try again at
 res=$(clasificar si 340 "$preview_mixto" "$ep_0920" "$ep_05_1500")
 assert_eq "$res" "esperando-reset" "preview mixto statusline + límite: ahora 05/11 15:00 -> esperando-reset"
 
+echo "=== Nuevos tests de extracción anclada y casos de revisión ==="
+# Caso A: statusline 'resets 14:00' + '5-hour limit reached · resets Nov 12, 2:10 PM'
+preview_caso_a=$'5h 30% resets 14:00\n5-hour limit reached · resets Nov 12, 2:10 PM'
+res=$(clasificar si 310 "$preview_caso_a" "$ep_0920" "$ep_1430")
+assert_eq "$res" "esperando-reset" "Caso A clasificar: ahora 05/11 14:30 -> esperando-reset"
+
+# Caso B: 'You hit your limit. Try again at ???' + '5h 30% resets 14:00' -> fallback 09:20+5h=14:20 (+15m=14:35)
+preview_caso_b=$'You hit your limit. Try again at ???\n5h 30% resets 14:00'
+res=$(clasificar si 310 "$preview_caso_b" "$ep_0920" "$ep_1430")
+assert_eq "$res" "esperando-reset" "Caso B clasificar: ahora 05/11 14:30 -> esperando-reset"
+res=$(clasificar si 316 "$preview_caso_b" "$ep_0920" "$ep_1436")
+assert_eq "$res" "libre" "Caso B clasificar: ahora 05/11 14:36 -> libre"
+
+# limit reached · resets 3 days -> fallback (no 03:00): base 09:20+5h=14:20 (+15m=14:35)
+res=$(clasificar si 310 "limit reached · resets 3 days" "$ep_0920" "$ep_1430")
+assert_eq "$res" "esperando-reset" "resets 3 days no es hora: ahora 14:30 -> esperando-reset"
+res=$(clasificar si 316 "limit reached · resets 3 days" "$ep_0920" "$ep_1436")
+assert_eq "$res" "libre" "resets 3 days no es hora: ahora 14:36 -> libre"
+
+# 'resets nov 12 at 4:50 pm' tras 'limit reached' con conector 'at'
+res=$(clasificar si 6000 "limit reached · resets nov 12 at 4:50 pm" "$ep_0920" "$ep_12_1650")
+assert_eq "$res" "esperando-reset" "resets nov 12 at 4:50 pm: ahora 12/11 16:50 -> esperando-reset"
+res=$(clasificar si 6016 "limit reached · resets nov 12 at 4:50 pm" "$ep_0920" "$ep_12_1706")
+assert_eq "$res" "libre" "resets nov 12 at 4:50 pm: ahora 12/11 17:06 -> libre"
+
+# ultima_salida=0, ahora 05/11 14:30, 'Try again at Nov 12, 2:10 PM' -> esperando-reset
+res=$(clasificar si 0 "Try again at Nov 12, 2:10 PM" 0 "$ep_1430")
+assert_eq "$res" "esperando-reset" "ultima_salida=0 con reset futuro Nov 12 -> esperando-reset"
+
 
 echo "=== Tests de integración: quien-trabaja.sh y apagar.sh con mock orca ==="
 
@@ -338,6 +367,11 @@ cat << EOF > "$MOCK_STATE/terminal_list.json"
 EOF
 : > "$MOCK_STATE/idle_status.txt"
 
+# Validación de columna 3 ('-') en TSV para título vacío
+qt_notitle_out=$("$SCRIPT_DIR/quien-trabaja.sh")
+line_notitle=$(echo "$qt_notitle_out" | grep "^term_notitle" || true)
+assert_eq "$line_notitle" $'term_notitle\tclaude\t-\ttrabajando\t0' "quien-trabaja.sh imprime '-' en columna 3 para título vacío"
+
 set +e
 apagar_notitle_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
 apagar_notitle_code=$?
@@ -454,6 +488,40 @@ if echo "$apagar_mixto_out" | grep -q "shutdown"; then
   failures=$((failures + 1))
 else
   echo "PASS: apagar.sh no imprime shutdown con preview mixto"
+fi
+
+echo "=== Defecto: Caso A en mock (statusline resets + 5-hour limit reached · resets Nov 12) ==="
+export AHORA_EPOCH="$ep_1430"
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_caso_a",
+        "agentIdentity": "claude",
+        "title": "Sesión Caso A",
+        "recordedPaneKey": "tab_a:leaf_a",
+        "lastOutputAt": $(( ep_0920 * 1000 )),
+        "preview": "5h 30% resets 14:00\n5-hour limit reached · resets Nov 12, 2:10 PM"
+      }
+    ]
+  }
+}
+EOF
+echo "term_caso_a:idle" > "$MOCK_STATE/idle_status.txt"
+
+set +e
+apagar_caso_a_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_caso_a_code=$?
+set -e
+
+assert_eq "$apagar_caso_a_code" "3" "Caso A en mock: apagar.sh sale 3"
+if echo "$apagar_caso_a_out" | grep -q "shutdown"; then
+  echo "FAIL: apagar.sh imprimió shutdown en Caso A" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: apagar.sh no imprime shutdown en Caso A"
 fi
 
 if [[ $failures -eq 0 ]]; then
