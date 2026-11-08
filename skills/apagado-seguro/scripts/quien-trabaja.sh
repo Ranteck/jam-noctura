@@ -34,8 +34,13 @@ clasificar() {
     local months="jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december"
     local time_pattern="(try again at|resets at|reset at|resets)[ :·•\t]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]*([0-9]{4}))?[,]?[ ]+)?([0-9]{1,2}(:[0-9]{2})?([ ]*(am|pm))?|[0-9]{1,2}:[0-9]{2})"
 
+    local search_text="$lower_preview"
+    if [[ "$lower_preview" == *"try again at"* ]]; then
+      search_text="try again at${lower_preview##*try again at}"
+    fi
+
     local reset_epoch=""
-    if [[ "$lower_preview" =~ $time_pattern ]]; then
+    if [[ "$search_text" =~ $time_pattern ]]; then
       local month="${BASH_REMATCH[3]}"
       local day="${BASH_REMATCH[5]}"
       local year="${BASH_REMATCH[8]}"

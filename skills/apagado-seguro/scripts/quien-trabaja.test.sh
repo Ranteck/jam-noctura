@@ -106,6 +106,11 @@ preview_multiline=$'You have hit your usage limit. Try\nagain at Nov 12, 2:10 PM
 res=$(clasificar si 340 "$preview_multiline" "$ep_0920" "$ep_05_1500")
 assert_eq "$res" "esperando-reset" "preview multilínea Try\nagain at Nov 12: ahora 05/11 15:00 -> esperando-reset"
 
+# Preview mixto: statusline con resets anterior + aviso de límite con Try again at
+preview_mixto=$'5h 30% resets 14:00\nYou have hit your usage limit. Try again at Nov 12, 2:10 PM'
+res=$(clasificar si 340 "$preview_mixto" "$ep_0920" "$ep_05_1500")
+assert_eq "$res" "esperando-reset" "preview mixto statusline + límite: ahora 05/11 15:00 -> esperando-reset"
+
 
 echo "=== Tests de integración: quien-trabaja.sh y apagar.sh con mock orca ==="
 
@@ -415,6 +420,40 @@ if echo "$apagar_valid_empty_out" | grep -q "shutdown"; then
 else
   echo "FAIL: apagar.sh no imprimió shutdown con terminals: [] válido" >&2
   failures=$((failures + 1))
+fi
+
+echo "=== Defecto: Preview mixto statusline + límite en mock ==="
+export AHORA_EPOCH="$ep_05_1500"
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_mixto",
+        "agentIdentity": "claude",
+        "title": "Sesión Mixta",
+        "recordedPaneKey": "tab_mixto:leaf_mixto",
+        "lastOutputAt": $(( ep_0920 * 1000 )),
+        "preview": "5h 30% resets 14:00\nYou have hit your usage limit. Try again at Nov 12, 2:10 PM"
+      }
+    ]
+  }
+}
+EOF
+echo "term_mixto:idle" > "$MOCK_STATE/idle_status.txt"
+
+set +e
+apagar_mixto_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_mixto_code=$?
+set -e
+
+assert_eq "$apagar_mixto_code" "3" "preview mixto en mock: apagar.sh sale 3"
+if echo "$apagar_mixto_out" | grep -q "shutdown"; then
+  echo "FAIL: apagar.sh imprimió shutdown con preview mixto" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: apagar.sh no imprime shutdown con preview mixto"
 fi
 
 if [[ $failures -eq 0 ]]; then
