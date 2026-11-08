@@ -75,6 +75,37 @@ assert_eq "$res" "esperando-reset" "si, frase de límite sin hora legible, últi
 res=$(clasificar si 320 "hit your limit! please wait" "$ep_0920" "$ep_1436")
 assert_eq "$res" "libre" "si, frase de límite sin hora legible (+5h=14:20 +15m=14:35), ahora 14:36 -> libre"
 
+echo "=== Defecto 3: Reset con fecha ==="
+ep_05_1500=$(date -d "2026-11-05 15:00:00" +%s)
+ep_12_1420=$(date -d "2026-11-12 14:20:00" +%s)
+ep_12_1426=$(date -d "2026-11-12 14:26:00" +%s)
+
+# Formato: "Try again at Nov 12, 2:10 PM" con última salida 05/11/2026 09:20
+res=$(clasificar si 340 "You have hit your usage limit. Try again at Nov 12, 2:10 PM" "$ep_0920" "$ep_05_1500")
+assert_eq "$res" "esperando-reset" "fecha futura Nov 12: ahora 05/11 15:00 -> esperando-reset"
+
+res=$(clasificar si 10380 "You have hit your usage limit. Try again at Nov 12, 2:10 PM" "$ep_0920" "$ep_12_1420")
+assert_eq "$res" "esperando-reset" "fecha futura Nov 12: ahora 12/11 14:20 -> esperando-reset"
+
+res=$(clasificar si 10386 "You have hit your usage limit. Try again at Nov 12, 2:10 PM" "$ep_0920" "$ep_12_1426")
+assert_eq "$res" "libre" "fecha futura Nov 12: ahora 12/11 14:26 -> libre"
+
+# Formato real de Codex con ordinal y año: "You've hit your usage limit. ... or try again at Nov 12th, 2026 4:50 PM."
+ep_07_2305=$(date -d "2026-11-07 23:05:00" +%s)
+ep_12_1650=$(date -d "2026-11-12 16:50:00" +%s)
+ep_12_1706=$(date -d "2026-11-12 17:06:00" +%s)
+
+res=$(clasificar si 6825 "You've hit your usage limit. ... or try again at Nov 12th, 2026 4:50 PM." "$ep_07_2305" "$ep_12_1650")
+assert_eq "$res" "esperando-reset" "Codex ordinal+año Nov 12th 2026 4:50 PM: ahora 12/11 16:50 -> esperando-reset"
+
+res=$(clasificar si 6841 "You've hit your usage limit. ... or try again at Nov 12th, 2026 4:50 PM." "$ep_07_2305" "$ep_12_1706")
+assert_eq "$res" "libre" "Codex ordinal+año Nov 12th 2026 4:50 PM: ahora 12/11 17:06 -> libre"
+
+# Texto partido en dos líneas ("try" / "again at")
+preview_multiline=$'You have hit your usage limit. Try\nagain at Nov 12, 2:10 PM'
+res=$(clasificar si 340 "$preview_multiline" "$ep_0920" "$ep_05_1500")
+assert_eq "$res" "esperando-reset" "preview multilínea Try\nagain at Nov 12: ahora 05/11 15:00 -> esperando-reset"
+
 
 echo "=== Tests de integración: quien-trabaja.sh y apagar.sh con mock orca ==="
 
@@ -279,6 +310,110 @@ if echo "$apagar_trabado_out" | grep -q 'shutdown -P +5 "turno-noche: apagado en
   echo "PASS: apagar.sh imprimió el comando de apagado correctamente"
 else
   echo "FAIL: apagar.sh no imprimió el comando de shutdown esperado: $apagar_trabado_out" >&2
+  failures=$((failures + 1))
+fi
+
+echo "=== Defecto 1: Título vacío corre los campos ==="
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_notitle",
+        "agentIdentity": "claude",
+        "title": "",
+        "recordedPaneKey": "tab_notitle:leaf_notitle",
+        "lastOutputAt": 1793884800000,
+        "preview": "trabajando en algo"
+      }
+    ]
+  }
+}
+EOF
+: > "$MOCK_STATE/idle_status.txt"
+
+set +e
+apagar_notitle_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_notitle_code=$?
+set -e
+
+assert_eq "$apagar_notitle_code" "3" "terminal con title vacío y agente trabajando: apagar.sh sale 3"
+if echo "$apagar_notitle_out" | grep -q "shutdown"; then
+  echo "FAIL: apagar.sh imprimió shutdown a pesar de terminal ocupada con title vacío" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: apagar.sh no imprime shutdown con title vacío y agente trabajando"
+fi
+
+echo "=== Defecto 2: Inventario inválido = nadie trabajando ==="
+
+# Caso 2a: ok: false con error
+echo '{"ok":false,"error":{"code":"unavailable"}}' > "$MOCK_STATE/terminal_list.json"
+
+set +e
+qt_err_out=$("$SCRIPT_DIR/quien-trabaja.sh" 2>&1)
+qt_err_code=$?
+apagar_err_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_err_code=$?
+set -e
+
+assert_eq "$qt_err_code" "1" "quien-trabaja.sh sale 1 cuando ok=false"
+if [[ "$apagar_err_code" -ne 0 ]]; then
+  echo "PASS: apagar.sh --simulacro sale distinto de 0 cuando ok=false"
+else
+  echo "FAIL: apagar.sh --simulacro sale 0 cuando ok=false (esperaba != 0)" >&2
+  failures=$((failures + 1))
+fi
+
+if echo "$apagar_err_out" | grep -q "shutdown"; then
+  echo "FAIL: apagar.sh imprimió shutdown cuando ok=false" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: apagar.sh no imprime shutdown cuando ok=false"
+fi
+
+# Caso 2b: JSON vacío {}
+echo '{}' > "$MOCK_STATE/terminal_list.json"
+
+set +e
+qt_empty_out=$("$SCRIPT_DIR/quien-trabaja.sh" 2>&1)
+qt_empty_code=$?
+apagar_empty_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_empty_code=$?
+set -e
+
+assert_eq "$qt_empty_code" "1" "quien-trabaja.sh sale 1 cuando json es {}"
+if [[ "$apagar_empty_code" -ne 0 ]]; then
+  echo "PASS: apagar.sh --simulacro sale distinto de 0 cuando json es {}"
+else
+  echo "FAIL: apagar.sh --simulacro sale 0 cuando json es {} (esperaba != 0)" >&2
+  failures=$((failures + 1))
+fi
+
+if echo "$apagar_empty_out" | grep -q "shutdown"; then
+  echo "FAIL: apagar.sh imprimió shutdown cuando json es {}" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: apagar.sh no imprime shutdown cuando json es {}"
+fi
+
+# Caso 2c: Array vacío válido (nadie trabajando)
+echo '{"ok":true,"result":{"terminals":[]}}' > "$MOCK_STATE/terminal_list.json"
+
+set +e
+qt_valid_empty_out=$("$SCRIPT_DIR/quien-trabaja.sh" 2>&1)
+qt_valid_empty_code=$?
+apagar_valid_empty_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_valid_empty_code=$?
+set -e
+
+assert_eq "$qt_valid_empty_code" "0" "quien-trabaja.sh sale 0 con terminals: []"
+assert_eq "$apagar_valid_empty_code" "0" "apagar.sh sale 0 con terminals: []"
+if echo "$apagar_valid_empty_out" | grep -q "shutdown"; then
+  echo "PASS: apagar.sh imprime shutdown con terminals: [] válido"
+else
+  echo "FAIL: apagar.sh no imprimió shutdown con terminals: [] válido" >&2
   failures=$((failures + 1))
 fi
 

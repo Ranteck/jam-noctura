@@ -20,7 +20,7 @@ clasificar() {
 
   # b. idle=si y el preview tiene una frase de límite (sin distinguir mayúsculas: try again at, limit reached, hit your limit, hit your usage limit)
   local lower_preview
-  lower_preview=$(tr "[:upper:]" "[:lower:]" <<< "$preview")
+  lower_preview=$(tr "[:upper:]" "[:lower:]" <<< "$preview" | tr '\r\n\t' ' ' | tr -s ' ')
 
   local has_limit_phrase=0
   for phrase in "try again at" "limit reached" "hit your limit" "hit your usage limit"; do
@@ -31,30 +31,47 @@ clasificar() {
   done
 
   if [[ $has_limit_phrase -eq 1 ]]; then
-    # Buscá la hora después de try again at, resets, resets at o reset at (formatos "2:10 PM", "3am", "14:10").
-    local hora=""
-    local time_pattern="(try again at|resets at|reset at|resets)[ :·•\t]*([0-9]{1,2}(:[0-9]{2})?([ ]*(am|pm))?|[0-9]{1,2}:[0-9]{2})"
-    if [[ "$lower_preview" =~ $time_pattern ]]; then
-      hora="${BASH_REMATCH[2]}"
-    fi
+    local months="jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december"
+    local time_pattern="(try again at|resets at|reset at|resets)[ :·•\t]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]*([0-9]{4}))?[,]?[ ]+)?([0-9]{1,2}(:[0-9]{2})?([ ]*(am|pm))?|[0-9]{1,2}:[0-9]{2})"
 
     local reset_epoch=""
-    if [[ -n "$hora" && "$ultima_salida" -gt 0 ]]; then
-      local date_salida
-      date_salida=$(date -d "@$ultima_salida" +%Y-%m-%d 2>/dev/null || true)
-      if [[ -n "$date_salida" ]]; then
-        reset_epoch=$(date -d "$date_salida $hora" +%s 2>/dev/null || true)
+    if [[ "$lower_preview" =~ $time_pattern ]]; then
+      local month="${BASH_REMATCH[3]}"
+      local day="${BASH_REMATCH[5]}"
+      local year="${BASH_REMATCH[8]}"
+      local hora="${BASH_REMATCH[9]}"
+
+      if [[ -n "$month" && -n "$day" ]]; then
+        # Con fecha: reset = esa fecha y hora (año de ultima_salida; si queda antes de ultima_salida, año siguiente).
+        # Si viene año opcional, se usa ese.
+        if [[ -n "$year" ]]; then
+          reset_epoch=$(date -d "$month $day $year $hora" +%s 2>/dev/null || true)
+        elif [[ "$ultima_salida" -gt 0 ]]; then
+          local year_salida
+          year_salida=$(date -d "@$ultima_salida" +%Y 2>/dev/null || true)
+          if [[ -n "$year_salida" ]]; then
+            reset_epoch=$(date -d "$month $day $year_salida $hora" +%s 2>/dev/null || true)
+            if [[ -n "$reset_epoch" ]] && (( reset_epoch < ultima_salida )); then
+              reset_epoch=$(date -d "$month $day $((year_salida + 1)) $hora" +%s 2>/dev/null || true)
+            fi
+          fi
+        fi
+      elif [[ -n "$hora" && "$ultima_salida" -gt 0 ]]; then
+        # Sin fecha: comportamiento actual (día de ultima_salida, +1 día si queda <=).
+        local date_salida
+        date_salida=$(date -d "@$ultima_salida" +%Y-%m-%d 2>/dev/null || true)
+        if [[ -n "$date_salida" ]]; then
+          reset_epoch=$(date -d "$date_salida $hora" +%s 2>/dev/null || true)
+          if [[ -n "$reset_epoch" ]] && (( reset_epoch <= ultima_salida )); then
+            reset_epoch=$(( reset_epoch + 86400 ))
+          fi
+        fi
       fi
     fi
 
     # Si no se puede leer la hora, reset = ultima_salida + 5 h.
     if [[ -z "$reset_epoch" ]]; then
       reset_epoch=$(( ultima_salida + 5 * 3600 ))
-    else
-      # reset = esa hora en el día de ultima_salida; si queda <= ultima_salida, al día siguiente.
-      if (( reset_epoch <= ultima_salida )); then
-        reset_epoch=$(( reset_epoch + 86400 ))
-      fi
     fi
 
     # esperando-reset si ahora < reset + 15 min; si no, libre (ya debería haber vuelto: nadie lo va a retomar).
@@ -78,6 +95,11 @@ main() {
   local raw_json
   if ! raw_json=$("$ORCA" terminal list --json 2>/dev/null); then
     echo "Error: no se pudo obtener la lista de terminales de Orca" >&2
+    exit 1
+  fi
+
+  if ! echo "$raw_json" | jq -e '.ok == true and (.result.terminals | type == "array")' >/dev/null 2>&1; then
+    echo "Error: respuesta inválida de Orca terminal list (se esperaba ok==true y result.terminals array)" >&2
     exit 1
   fi
 
@@ -122,6 +144,7 @@ main() {
     clean_titulo="${titulo//$'\t'/ }"
     clean_titulo="${clean_titulo//$'\r'/}"
     clean_titulo="${clean_titulo//$'\n'/ }"
+    [[ -z "$clean_titulo" ]] && clean_titulo="-"
 
     printf "%s\t%s\t%s\t%s\t%s\n" "$handle" "$agente" "$clean_titulo" "$estado" "$min_sin_salida"
   done <<< "$terminals"
