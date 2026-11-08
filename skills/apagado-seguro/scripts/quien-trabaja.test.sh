@@ -140,6 +140,16 @@ assert_eq "$res" "libre" "resets nov 12 at 4:50 pm: ahora 12/11 17:06 -> libre"
 res=$(clasificar si 0 "Try again at Nov 12, 2:10 PM" 0 "$ep_1430")
 assert_eq "$res" "esperando-reset" "ultima_salida=0 con reset futuro Nov 12 -> esperando-reset"
 
+# R03: ultima_salida=0 y hora sin fecha:
+# Si la hora de hoy ya pasó, usar mañana SOLO si queda a 5 h o menos de ahora; si no, hoy (y se libera a reset+15).
+ep_05_1500=$(date -d "2026-11-05 15:00:00" +%s)
+res=$(clasificar si 0 "You have hit your usage limit · resets 2:40pm" 0 "$ep_05_1500")
+assert_eq "$res" "libre" "R03: ultima_salida=0, ahora 15:00, resets 2:40pm -> libre"
+
+ep_05_2300=$(date -d "2026-11-05 23:00:00" +%s)
+res=$(clasificar si 0 "You have hit your usage limit · resets 3am" 0 "$ep_05_2300")
+assert_eq "$res" "esperando-reset" "R03: ultima_salida=0, ahora 23:00, resets 3am -> esperando-reset"
+
 echo "=== Tests de avisos de límite reales de Claude Code ==="
 ep_05_1000=$(date -d "2026-11-05 10:00:00" +%s)
 ep_05_1450=$(date -d "2026-11-05 14:50:00" +%s)

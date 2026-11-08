@@ -81,9 +81,25 @@ clasificar() {
         cur_date=$(_date_with_tz "$notice_tz" -d "@$base" +%Y-%m-%d 2>/dev/null || true)
         next_date=$(_date_with_tz "$notice_tz" -d "$cur_date + 1 day" +%Y-%m-%d 2>/dev/null || true)
         if [[ -n "$cur_date" ]]; then
-          reset_epoch=$(_date_with_tz "$notice_tz" -d "$cur_date $hora" +%s 2>/dev/null || true)
-          if [[ -n "$reset_epoch" ]] && (( reset_epoch <= base )); then
-            reset_epoch=$(_date_with_tz "$notice_tz" -d "$next_date $hora" +%s 2>/dev/null || true)
+          local reset_today reset_tomorrow
+          reset_today=$(_date_with_tz "$notice_tz" -d "$cur_date $hora" +%s 2>/dev/null || true)
+          reset_tomorrow=$(_date_with_tz "$notice_tz" -d "$next_date $hora" +%s 2>/dev/null || true)
+          if [[ -n "$reset_today" ]]; then
+            if (( reset_today > base )); then
+              reset_epoch="$reset_today"
+            else
+              if (( ultima_salida > 0 )); then
+                reset_epoch="$reset_tomorrow"
+              else
+                # con ultima_salida=0 y hora sin fecha: si la hora de hoy ya pasó,
+                # usar mañana SOLO si queda a 5 h o menos de ahora; si no, hoy (y se libera a reset+15).
+                if [[ -n "$reset_tomorrow" ]] && (( reset_tomorrow - ahora <= 5 * 3600 )); then
+                  reset_epoch="$reset_tomorrow"
+                else
+                  reset_epoch="$reset_today"
+                fi
+              fi
+            fi
           fi
         fi
       fi

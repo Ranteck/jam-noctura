@@ -33,9 +33,24 @@ assert_eq "hora suelta hoy '2:10 PM' -> 22 14 5 11 *" "22 14 5 11 *" "$salida"
 salida=$(AHORA_EPOCH="$EPOCH_1500" "$CRON_DESPERTAR" "2:10 PM")
 assert_eq "hora suelta pasada '2:10 PM' -> 22 14 6 11 *" "22 14 6 11 *" "$salida"
 
+# R04: cron-despertar.sh compara la hora de despertar (epoch + margen) contra ahora antes de pasar a mañana
+EPOCH_1412=$(TZ="$TZ" date -d "2026-11-05 14:12:00" +%s)
+salida=$(AHORA_EPOCH="$EPOCH_1412" "$CRON_DESPERTAR" "2:10 PM")
+assert_eq "R04: despertar con margen hoy (14:12 para 14:22) -> 22 14 5 11 *" "22 14 5 11 *" "$salida"
+
 # F03: Hora suelta en formato 24h que ya pasó ("14:10" desde las 15:00) -> mañana 14:22
 salida=$(AHORA_EPOCH="$EPOCH_1500" "$CRON_DESPERTAR" "14:10")
 assert_eq "F03: hora suelta pasada 24h '14:10' -> 22 14 6 11 *" "22 14 6 11 *" "$salida"
+
+# R05: fechas de avisos semanales ('Oct 28 5am', 'Nov 12, 2:10 PM', 'Nov 12th, 2026 4:50 PM')
+salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "Oct 28 5am")
+assert_eq "R05: aviso semanal 'Oct 28 5am' -> 12 5 28 10 *" "12 5 28 10 *" "$salida"
+
+salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "Nov 12, 2:10 PM")
+assert_eq "R05: aviso semanal 'Nov 12, 2:10 PM' -> 22 14 12 11 *" "22 14 12 11 *" "$salida"
+
+salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "Nov 12th, 2026 4:50 PM")
+assert_eq "R05: aviso semanal 'Nov 12th, 2026 4:50 PM' -> 2 17 12 11 *" "2 17 12 11 *" "$salida"
 
 # 4. Hora suelta que ya pasó ("3am" desde las 09:00) con margen 15 -> mañana 03:15
 salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "3am" 15)
@@ -98,5 +113,16 @@ for invalid_payload in \
   fi
 done
 echo "OK [F08 api validation]: todas las respuestas corruptas de la API fueron rechazadas con error"
+
+# R01: uso-claude.sh acepta resets_at null cuando utilization es 0
+cat << 'EOF' > "$test_mock_dir/resp_null.json"
+{
+  "five_hour": {"utilization": 0.0, "resets_at": null},
+  "seven_day": {"utilization": 30.0, "resets_at": "2026-11-12T16:00:00Z"}
+}
+EOF
+out_null=$(PATH="$test_mock_dir/bin:$PATH" CLAUDE_CONFIG_DIR="$test_mock_dir/creds" TEST_API_RESPONSE="$test_mock_dir/resp_null.json" "$USO_CLAUDE")
+assert_eq "R01: five_hour.pct es 0" "0" "$(echo "$out_null" | jq -r '.cinco_horas.pct')"
+assert_eq "R01: five_hour.reset es null" "null" "$(echo "$out_null" | jq -r '.cinco_horas.reset')"
 
 echo "Todos los tests de cron-despertar y uso-claude pasaron correctamente."
