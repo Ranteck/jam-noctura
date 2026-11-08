@@ -1,6 +1,7 @@
 # Spec: turno-noche (desde intent.md 2026-11-05)
 Estado: aceptado (Denis, 2026-11-05, con los ajustes de REQ-1, REQ-9 y REQ-12: "me parece bien armar
-todo el spec"). Pendiente: revisión de Codex cuando recupere cuota.
+todo el spec"). Revisado por Codex y Antigravity (2026-11-07): aprobado tras los arreglos de
+apagado-seguro d871049, a701af8, 9ae659b y 2ba72f8.
 
 Glosario: **turno** = desde que Denis lo arranca hasta que se apaga la PC o vuelve. **Ficha** = el
 encargo del turno, escrito en un archivo.
