@@ -883,6 +883,60 @@ else
 fi
 rm -f "$f11_stderr"
 
+# === Regresiones N01 y N02 ===
+# N01: aviso semanal sin fecha y lastOutputAt=null a las 22:00 -> esperando-reset (apagar.sh sale 3)
+ep_n01_now=$(date -d "2026-11-05 22:00:00" +%s)
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_n01",
+        "agentIdentity": "claude",
+        "title": "N01 weekly limit",
+        "recordedPaneKey": "tab_n01:leaf_n01",
+        "lastOutputAt": null,
+        "preview": "You've hit your weekly limit · resets 4am"
+      }
+    ]
+  }
+}
+EOF
+echo "term_n01:idle" > "$MOCK_STATE/idle_status.txt"
+set +e
+apagar_n01_out=$(AHORA_EPOCH="$ep_n01_now" "$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_n01_code=$?
+set -e
+assert_eq "$apagar_n01_code" "3" "N01: aviso semanal sin fecha y lastOutputAt=null a las 22:00 sale 3 (esperando-reset)"
+
+# N02: zona del aviso anclado (no de todo el preview)
+ep_n02_now=$(TZ="UTC" date -d "2026-11-05 12:00:00" +%s)
+ep_n02_last=$(TZ="UTC" date -d "2026-11-05 00:00:00" +%s)
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_n02",
+        "agentIdentity": "claude",
+        "title": "N02 timezone anchor",
+        "recordedPaneKey": "tab_n02:leaf_n02",
+        "lastOutputAt": $(( ep_n02_last * 1000 )),
+        "preview": "You've hit your session limit · resets 2pm (Asia/Tokyo)\nYou've hit your session limit · resets 2pm (America/Argentina/Buenos_Aires)"
+      }
+    ]
+  }
+}
+EOF
+echo "term_n02:idle" > "$MOCK_STATE/idle_status.txt"
+set +e
+apagar_n02_out=$(TZ="UTC" AHORA_EPOCH="$ep_n02_now" "$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_n02_code=$?
+set -e
+assert_eq "$apagar_n02_code" "3" "N02: zona horaria del aviso anclado (America/Argentina/Buenos_Aires) se usa y sale 3"
+
 if [[ $failures -eq 0 ]]; then
   echo "TODOS LOS TESTS PASARON EXITOSAMENTE."
   exit 0

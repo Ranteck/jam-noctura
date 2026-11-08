@@ -9,8 +9,8 @@ fi
 hora_input="$1"
 margen_min="${2:-12}"
 
-if ! [[ "$margen_min" =~ ^[0-9]+$ ]]; then
-    echo "Error: margen_min debe ser un número entero mayor o igual a 0: $margen_min" >&2
+if ! [[ "$margen_min" =~ ^[0-9]{1,4}$ ]] || [ "$((10#$margen_min))" -gt 1440 ]; then
+    echo "Error: margen_min debe ser un número entero entre 0 y 1440: $margen_min" >&2
     exit 1
 fi
 

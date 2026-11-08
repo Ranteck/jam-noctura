@@ -18,20 +18,22 @@ clasificar() {
   local ultima_salida="${4:-0}"
   local ahora="${5:-$(date +%s)}"
 
-  local notice_tz=""
-  if [[ "$preview" =~ \(([A-Za-z_]+/[A-Za-z0-9_/-]+)\) ]]; then
-    notice_tz="${BASH_REMATCH[1]}"
-  fi
-
-  # b. el preview tiene una frase de límite (sin distinguir mayúsculas: try again at, limit reached, hit your ([a-z0-9-]+ )?limit)
+  local norm_preview
+  norm_preview=$(printf '%s' "$preview" | tr '\r\n\t' ' ' | tr -s ' ')
   local lower_preview
-  lower_preview=$(tr "[:upper:]" "[:lower:]" <<< "$preview" | tr '\r\n\t' ' ' | tr -s ' ')
+  lower_preview=$(tr "[:upper:]" "[:lower:]" <<< "$norm_preview")
 
   local tail=""
+  local raw_tail=""
+  local notice_tz=""
   local limit_pattern="(.*)(try again at|limit reached|hit your ([a-z0-9-]+ )?limit)"
   if [[ "$lower_preview" =~ $limit_pattern ]]; then
     local prefix="${BASH_REMATCH[1]}"
     tail="${lower_preview:${#prefix}}"
+    raw_tail="${norm_preview:${#prefix}}"
+    if [[ "$raw_tail" =~ \(([A-Za-z_]+/[A-Za-z0-9_/-]+)\) ]]; then
+      notice_tz="${BASH_REMATCH[1]}"
+    fi
   fi
 
   if [[ -n "$tail" ]]; then
@@ -91,9 +93,12 @@ clasificar() {
               if (( ultima_salida > 0 )); then
                 reset_epoch="$reset_tomorrow"
               else
+                # Si el aviso anclado en la cola contiene 'weekly', programar SIEMPRE para mañana
+                if [[ "$tail" =~ weekly ]]; then
+                  reset_epoch="$reset_tomorrow"
                 # con ultima_salida=0 y hora sin fecha: si la hora de hoy ya pasó,
                 # usar mañana SOLO si queda a 5 h o menos de ahora; si no, hoy (y se libera a reset+15).
-                if [[ -n "$reset_tomorrow" ]] && (( reset_tomorrow - ahora <= 5 * 3600 )); then
+                elif [[ -n "$reset_tomorrow" ]] && (( reset_tomorrow - ahora <= 5 * 3600 )); then
                   reset_epoch="$reset_tomorrow"
                 else
                   reset_epoch="$reset_today"

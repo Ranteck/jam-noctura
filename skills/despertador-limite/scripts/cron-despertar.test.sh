@@ -101,7 +101,8 @@ for invalid_payload in \
   '{"five_hour":{"utilization":200,"resets_at":"2026-11-05T16:00:00Z"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}' \
   '{"five_hour":{"utilization":"bad","resets_at":"2026-11-05T16:00:00Z"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}' \
   '{"five_hour":{"utilization":50,"resets_at":"tomorrow"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}' \
-  '{"five_hour":{"utilization":50,"resets_at":"2026-11-05"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}'; do
+  '{"five_hour":{"utilization":50,"resets_at":"2026-11-05"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}' \
+  '{"five_hour":{"utilization":20,"resets_at":"2026-11-05T16:00 +2 days"},"seven_day":{"utilization":0,"resets_at":null}}'; do
   echo "$invalid_payload" > "$test_mock_dir/resp.json"
   set +e
   out=$(PATH="$test_mock_dir/bin:$PATH" CLAUDE_CONFIG_DIR="$test_mock_dir/creds" TEST_API_RESPONSE="$test_mock_dir/resp.json" "$USO_CLAUDE" 2>&1)
@@ -124,5 +125,18 @@ EOF
 out_null=$(PATH="$test_mock_dir/bin:$PATH" CLAUDE_CONFIG_DIR="$test_mock_dir/creds" TEST_API_RESPONSE="$test_mock_dir/resp_null.json" "$USO_CLAUDE")
 assert_eq "R01: five_hour.pct es 0" "0" "$(echo "$out_null" | jq -r '.cinco_horas.pct')"
 assert_eq "R01: five_hour.reset es null" "null" "$(echo "$out_null" | jq -r '.cinco_horas.reset')"
+
+# N04: validación estricta de rango para margen_min (0..1440)
+for bad_margin in "18446744073709551616" "1441" "-1" "abc"; do
+  set +e
+  out_bad_margin=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "14:10" "$bad_margin" 2>&1)
+  code_bad_margin=$?
+  set -e
+  if [ "$code_bad_margin" -eq 0 ]; then
+    echo "FAIL [N04 margen_min range]: se esperaba error para margen '$bad_margin' pero salió 0" >&2
+    exit 1
+  fi
+done
+echo "OK [N04 margen_min range]: márgenes inválidos o desbordados rechazados con error"
 
 echo "Todos los tests de cron-despertar y uso-claude pasaron correctamente."

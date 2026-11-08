@@ -32,8 +32,8 @@ if ! echo "$response" | jq -e '
   (.seven_day | type == "object") and
   (.five_hour.utilization | (type == "number" and . >= 0 and . <= 100)) and
   (.seven_day.utilization | (type == "number" and . >= 0 and . <= 100)) and
-  (.five_hour.resets_at | (. == null or (type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}")))) and
-  (.seven_day.resets_at | (. == null or (type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}"))))
+  (.five_hour.resets_at | (. == null or (type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\\.[0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})?$")))) and
+  (.seven_day.resets_at | (. == null or (type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\\.[0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})?$"))))
 ' >/dev/null 2>&1; then
     echo "Error: respuesta inválida o sin datos válidos de rate limit de Anthropic" >&2
     exit 1
