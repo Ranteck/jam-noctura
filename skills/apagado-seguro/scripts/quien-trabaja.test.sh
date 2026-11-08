@@ -140,6 +140,48 @@ assert_eq "$res" "libre" "resets nov 12 at 4:50 pm: ahora 12/11 17:06 -> libre"
 res=$(clasificar si 0 "Try again at Nov 12, 2:10 PM" 0 "$ep_1430")
 assert_eq "$res" "esperando-reset" "ultima_salida=0 con reset futuro Nov 12 -> esperando-reset"
 
+echo "=== Tests de avisos de límite reales de Claude Code ==="
+ep_05_1000=$(date -d "2026-11-05 10:00:00" +%s)
+ep_05_1450=$(date -d "2026-11-05 14:50:00" +%s)
+ep_05_1456=$(date -d "2026-11-05 14:56:00" +%s)
+ep_05_1850=$(date -d "2026-11-05 18:50:00" +%s)
+ep_05_1856=$(date -d "2026-11-05 18:56:00" +%s)
+
+ep_oct20_1000=$(date -d "2026-10-20 10:00:00" +%s)
+ep_oct28_0510=$(date -d "2026-10-28 05:10:00" +%s)
+ep_oct28_0516=$(date -d "2026-10-28 05:16:00" +%s)
+
+ep_06_0510=$(date -d "2026-11-06 05:10:00" +%s)
+ep_06_0516=$(date -d "2026-11-06 05:16:00" +%s)
+
+# 1. session limit: 'You'\''ve hit your session limit · resets 2:40pm (America/Argentina/Buenos_Aires)'
+preview_session="You've hit your session limit · resets 2:40pm (America/Argentina/Buenos_Aires)"
+res=$(clasificar si 290 "$preview_session" "$ep_05_1000" "$ep_05_1450")
+assert_eq "$res" "esperando-reset" "Claude Code session limit 2:40pm: ahora 14:50 -> esperando-reset"
+res=$(clasificar si 296 "$preview_session" "$ep_05_1000" "$ep_05_1456")
+assert_eq "$res" "libre" "Claude Code session limit 2:40pm: ahora 14:56 -> libre"
+
+# 2. 5-hour limit: 'You'\''ve hit your 5-hour limit · resets 6:40pm (America/Argentina/Buenos_Aires)'
+preview_5h="You've hit your 5-hour limit · resets 6:40pm (America/Argentina/Buenos_Aires)"
+res=$(clasificar si 530 "$preview_5h" "$ep_05_1000" "$ep_05_1850")
+assert_eq "$res" "esperando-reset" "Claude Code 5-hour limit 6:40pm: ahora 18:50 -> esperando-reset"
+res=$(clasificar si 536 "$preview_5h" "$ep_05_1000" "$ep_05_1856")
+assert_eq "$res" "libre" "Claude Code 5-hour limit 6:40pm: ahora 18:56 -> libre"
+
+# 3. weekly limit con fecha: 'You'\''ve hit your weekly limit · resets Oct 28, 5am (America/Argentina/Buenos_Aires)'
+preview_weekly_date="You've hit your weekly limit · resets Oct 28, 5am (America/Argentina/Buenos_Aires)"
+res=$(clasificar si 11230 "$preview_weekly_date" "$ep_oct20_1000" "$ep_oct28_0510")
+assert_eq "$res" "esperando-reset" "Claude Code weekly limit Oct 28 5am: ahora 28/10 05:10 -> esperando-reset"
+res=$(clasificar si 11236 "$preview_weekly_date" "$ep_oct20_1000" "$ep_oct28_0516")
+assert_eq "$res" "libre" "Claude Code weekly limit Oct 28 5am: ahora 28/10 05:16 -> libre"
+
+# 4. weekly limit sin fecha: 'You'\''ve hit your weekly limit · resets 5am (America/Argentina/Buenos_Aires)'
+preview_weekly_nodate="You've hit your weekly limit · resets 5am (America/Argentina/Buenos_Aires)"
+res=$(clasificar si 1150 "$preview_weekly_nodate" "$ep_05_1000" "$ep_06_0510")
+assert_eq "$res" "esperando-reset" "Claude Code weekly limit 5am (al día siguiente): ahora 06/11 05:10 -> esperando-reset"
+res=$(clasificar si 1156 "$preview_weekly_nodate" "$ep_05_1000" "$ep_06_0516")
+assert_eq "$res" "libre" "Claude Code weekly limit 5am (al día siguiente): ahora 06/11 05:16 -> libre"
+
 
 echo "=== Tests de integración: quien-trabaja.sh y apagar.sh con mock orca ==="
 
@@ -522,6 +564,40 @@ if echo "$apagar_caso_a_out" | grep -q "shutdown"; then
   failures=$((failures + 1))
 else
   echo "PASS: apagar.sh no imprime shutdown en Caso A"
+fi
+
+echo "=== Defecto: Claude Code session limit en mock ==="
+export AHORA_EPOCH="$ep_05_1450"
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_session",
+        "agentIdentity": "claude",
+        "title": "Sesión Claude Code",
+        "recordedPaneKey": "tab_sess:leaf_sess",
+        "lastOutputAt": $(( ep_05_1000 * 1000 )),
+        "preview": "You've hit your session limit · resets 2:40pm (America/Argentina/Buenos_Aires)"
+      }
+    ]
+  }
+}
+EOF
+echo "term_session:idle" > "$MOCK_STATE/idle_status.txt"
+
+set +e
+apagar_session_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_session_code=$?
+set -e
+
+assert_eq "$apagar_session_code" "3" "Claude Code session limit en mock: apagar.sh sale 3"
+if echo "$apagar_session_out" | grep -q "shutdown"; then
+  echo "FAIL: apagar.sh imprimió shutdown en Claude Code session limit" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: apagar.sh no imprime shutdown en Claude Code session limit"
 fi
 
 if [[ $failures -eq 0 ]]; then

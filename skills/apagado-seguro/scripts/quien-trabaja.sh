@@ -18,34 +18,26 @@ clasificar() {
     return 0
   fi
 
-  # b. idle=si y el preview tiene una frase de límite (sin distinguir mayúsculas: try again at, limit reached, hit your limit, hit your usage limit)
+  # b. idle=si y el preview tiene una frase de límite (sin distinguir mayúsculas: try again at, limit reached, hit your ([a-z0-9-]+ )?limit)
   local lower_preview
   lower_preview=$(tr "[:upper:]" "[:lower:]" <<< "$preview" | tr '\r\n\t' ' ' | tr -s ' ')
 
-  local phrases=("try again at" "limit reached" "hit your limit" "hit your usage limit")
-  local max_idx=-1
   local tail=""
-
-  for p in "${phrases[@]}"; do
-    if [[ "$lower_preview" == *"$p"* ]]; then
-      local pre="${lower_preview%$p*}"
-      local idx="${#pre}"
-      if (( idx > max_idx )); then
-        max_idx=$idx
-        tail="${lower_preview:idx}"
-      fi
-    fi
-  done
+  local limit_pattern="(.*)(try again at|limit reached|hit your ([a-z0-9-]+ )?limit)"
+  if [[ "$lower_preview" =~ $limit_pattern ]]; then
+    local prefix="${BASH_REMATCH[1]}"
+    tail="${lower_preview:${#prefix}}"
+  fi
 
   if [[ -n "$tail" ]]; then
     local after_anchor=""
     if [[ "$tail" == "try again at"* ]]; then
       after_anchor="${tail#try again at}"
     else
-      local first30="${tail:0:30}"
-      if [[ "$first30" =~ (resets at|reset at|resets) ]]; then
+      local first50="${tail:0:50}"
+      if [[ "$first50" =~ (resets at|reset at|resets) ]]; then
         local kw="${BASH_REMATCH[1]}"
-        local pre="${first30%%"$kw"*}"
+        local pre="${first50%%"$kw"*}"
         local offset=$(( ${#pre} + ${#kw} ))
         after_anchor="${tail:offset}"
       fi
