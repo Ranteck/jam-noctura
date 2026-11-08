@@ -182,6 +182,31 @@ assert_eq "$res" "esperando-reset" "Claude Code weekly limit 5am (al día siguie
 res=$(clasificar si 1156 "$preview_weekly_nodate" "$ep_05_1000" "$ep_06_0516")
 assert_eq "$res" "libre" "Claude Code weekly limit 5am (al día siguiente): ahora 06/11 05:16 -> libre"
 
+echo "=== Tests de revisión adversaria (F04, F05, F06, F10) ==="
+# F04: Zona explícita IANA en el aviso (America/Argentina/Buenos_Aires) evaluada en host UTC
+ep_f04_base=$(TZ=UTC date -d "2026-11-05 09:00:00" +%s)
+ep_f04_now=$(TZ=UTC date -d "2026-11-05 15:00:00" +%s)
+res=$(TZ=UTC clasificar si 0 "You've hit your session limit · resets 2:40pm (America/Argentina/Buenos_Aires)" "$ep_f04_base" "$ep_f04_now")
+assert_eq "$res" "esperando-reset" "F04: aviso con TZ explícito evaluado en host UTC -> esperando-reset"
+
+# F05: DST fall en Nueva York (03:00 no alcanzado a las 02:30 del 1 de noviembre)
+ep_f05_base=$(TZ="America/New_York" date -d "2026-10-31 23:00:00" +%s)
+ep_f05_now=$(TZ="America/New_York" date -d "2026-11-01 02:30:00" +%s)
+res=$(TZ="America/New_York" clasificar si 0 "You've hit your session limit · resets 3am" "$ep_f05_base" "$ep_f05_now")
+assert_eq "$res" "esperando-reset" "F05: DST fall reset 03:00 no alcanzado a las 02:30 -> esperando-reset"
+
+# F06: Segundos en la hora 'Nov 12, 2:10:59 PM' no debe truncarse a 2:10 AM
+ep_f06_base=$(TZ="$TZ" date -d "2026-11-05 09:00:00" +%s)
+ep_f06_now=$(TZ="$TZ" date -d "2026-11-12 14:00:00" +%s)
+res=$(clasificar si 0 "Try again at Nov 12, 2:10:59 PM" "$ep_f06_base" "$ep_f06_now")
+assert_eq "$res" "esperando-reset" "F06: reset 14:10:59 no alcanzado a las 14:00 -> esperando-reset"
+
+# F10: idle=no pero con aviso de límite pendiente a las 2pm manda sobre regla de 60 min
+ep_f10_base=$(TZ="$TZ" date -d "2026-11-05 08:00:00" +%s)
+ep_f10_now=$(TZ="$TZ" date -d "2026-11-05 10:00:00" +%s)
+res=$(clasificar no 120 "You've hit your session limit · resets 2pm" "$ep_f10_base" "$ep_f10_now")
+assert_eq "$res" "esperando-reset" "F10: aviso de límite pendiente a las 2pm manda sobre idle=no y 120 min -> esperando-reset"
+
 
 echo "=== Tests de integración: quien-trabaja.sh y apagar.sh con mock orca ==="
 
@@ -201,6 +226,10 @@ if [[ "$cmd" == "terminal" && "$subcmd" == "list" ]]; then
   cat "$MOCK_ORCA_STATE/terminal_list.json"
   exit 0
 elif [[ "$cmd" == "terminal" && "$subcmd" == "wait" ]]; then
+  if [[ -f "$MOCK_ORCA_STATE/wait_override.json" ]]; then
+    cat "$MOCK_ORCA_STATE/wait_override.json"
+    exit 0
+  fi
   handle=""
   while [[ $# -gt 0 ]]; do
     if [[ "$1" == "--terminal" ]]; then
@@ -599,6 +628,184 @@ if echo "$apagar_session_out" | grep -q "shutdown"; then
 else
   echo "PASS: apagar.sh no imprime shutdown en Claude Code session limit"
 fi
+
+echo "=== Tests de integración adversarios (F01, F02, F09, F10, F11) ==="
+
+# F01: lastOutputAt en segundos con sesión ocupada (no idle) debe clasificar trabajando y apagar salir 3
+ep_f01_output=$(date -d "2026-11-05 09:55:00" +%s)
+export AHORA_EPOCH="$ep_05_1000"
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_f01",
+        "agentIdentity": "claude",
+        "title": "F01 seconds",
+        "recordedPaneKey": "tab_f01:leaf_f01",
+        "lastOutputAt": $ep_f01_output,
+        "preview": "working"
+      }
+    ]
+  }
+}
+EOF
+: > "$MOCK_STATE/idle_status.txt"
+rm -f "$MOCK_STATE/wait_override.json"
+
+set +e
+apagar_f01_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_f01_code=$?
+set -e
+
+assert_eq "$apagar_f01_code" "3" "F01: timestamp en segundos con agente ocupado apagar.sh sale 3"
+if echo "$apagar_f01_out" | grep -q "shutdown"; then
+  echo "FAIL: F01: apagar.sh imprimió shutdown con timestamp en segundos" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: F01: apagar.sh no imprime shutdown con timestamp en segundos"
+fi
+
+# F02: handle vacío o con tabs, o agentIdentity con tabs
+for bad_term in '{"handle":"","agentIdentity":"claude"}' '{"handle":"term\tx","agentIdentity":"claude"}' '{"handle":"term_x","agentIdentity":"claude\tx"}'; do
+  cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      $bad_term
+    ]
+  }
+}
+EOF
+  set +e
+  qt_bad_code=0
+  "$SCRIPT_DIR/quien-trabaja.sh" >/dev/null 2>&1 || qt_bad_code=$?
+  apagar_bad_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+  apagar_bad_code=$?
+  set -e
+  if [ "$apagar_bad_code" -ne 0 ] && ! echo "$apagar_bad_out" | grep -q "shutdown"; then
+    echo "PASS: F02: terminal malformada $bad_term bloquea shutdown con error"
+  else
+    echo "FAIL: F02: terminal malformada $bad_term no bloqueó shutdown (code=$apagar_bad_code)" >&2
+    failures=$((failures + 1))
+  fi
+done
+
+# F02b: fila TSV con estado corrupto en apagar.sh
+set +e
+apagar_bad_tsv_out=$(printf "term_bad\tclaude\tTitulo\testado_invalido\t5\n" | "$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_bad_tsv_code=$?
+set -e
+if [ "$apagar_bad_tsv_code" -ne 0 ] && ! echo "$apagar_bad_tsv_out" | grep -q "shutdown"; then
+  echo "PASS: F02b: estado inválido en TSV hace salir a apagar.sh con error"
+else
+  echo "FAIL: F02b: estado inválido en TSV no produjo error en apagar.sh (code=$apagar_bad_tsv_code)" >&2
+  failures=$((failures + 1))
+fi
+
+# F09: wait_out con ok string "false" debe fallar closed (no considerar idle)
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_f09",
+        "agentIdentity": "claude",
+        "title": "F09 nonboolean ok",
+        "recordedPaneKey": "tab_f09:leaf_f09",
+        "lastOutputAt": $(( ep_05_1000 * 1000 )),
+        "preview": "working"
+      }
+    ]
+  }
+}
+EOF
+echo '{"ok":"false","result":{"wait":{"satisfied":true}}}' > "$MOCK_STATE/wait_override.json"
+
+set +e
+apagar_f09_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_f09_code=$?
+set -e
+
+if [ "$apagar_f09_code" -ne 0 ] && ! echo "$apagar_f09_out" | grep -q "shutdown"; then
+  echo "PASS: F09: ok no booleano no autoriza shutdown"
+else
+  echo "FAIL: F09: ok no booleano autorizó shutdown (code=$apagar_f09_code)" >&2
+  failures=$((failures + 1))
+fi
+rm -f "$MOCK_STATE/wait_override.json"
+
+# F10: wait timeout con preview de límite pendiente
+ep_f10_out=$(date -d "2026-11-05 08:00:00" +%s)
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_f10",
+        "agentIdentity": "claude",
+        "title": "F10 timeout",
+        "recordedPaneKey": "tab_f10:leaf_f10",
+        "lastOutputAt": $(( ep_f10_out * 1000 )),
+        "preview": "You've hit your session limit · resets 2pm"
+      }
+    ]
+  }
+}
+EOF
+: > "$MOCK_STATE/idle_status.txt"
+set +e
+apagar_f10_out=$("$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_f10_code=$?
+set -e
+assert_eq "$apagar_f10_code" "3" "F10: wait timeout preserva aviso pendiente: apagar.sh sale 3"
+if echo "$apagar_f10_out" | grep -q "shutdown"; then
+  echo "FAIL: F10: apagar.sh imprimió shutdown con wait timeout y aviso pendiente" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: F10: apagar.sh no imprime shutdown con wait timeout y aviso pendiente"
+fi
+
+# F11: inyección de shell en lastOutputAt
+cat << 'EOF' > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_f11",
+        "agentIdentity": "claude",
+        "title": "F11 injection",
+        "recordedPaneKey": "tab_f11:leaf_f11",
+        "lastOutputAt": "now_s[$(printf ARITHMETIC_EXECUTED >&2)0]",
+        "preview": "working"
+      }
+    ]
+  }
+}
+EOF
+set +e
+f11_stderr=$(mktemp)
+"$SCRIPT_DIR/quien-trabaja.sh" 2>"$f11_stderr" >/dev/null
+f11_code=$?
+set -e
+if grep -q "ARITHMETIC_EXECUTED" "$f11_stderr"; then
+  echo "FAIL: F11: lastOutputAt ejecutó sustitución de comando en shell" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: F11: lastOutputAt no ejecutó shell"
+fi
+if [ "$f11_code" -ne 0 ]; then
+  echo "PASS: F11: quien-trabaja.sh sale con error ante lastOutputAt inválido"
+else
+  echo "FAIL: F11: quien-trabaja.sh salió 0 con lastOutputAt string inválido" >&2
+  failures=$((failures + 1))
+fi
+rm -f "$f11_stderr"
 
 if [[ $failures -eq 0 ]]; then
   echo "TODOS LOS TESTS PASARON EXITOSAMENTE."

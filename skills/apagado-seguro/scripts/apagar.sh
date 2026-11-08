@@ -24,8 +24,20 @@ no_libres=""
 hay_bloqueo=0
 
 if [[ -n "$lineas" ]]; then
-  while IFS=$'\t' read -r handle agente titulo estado min_sin_salida; do
+  while IFS=$'\t' read -r handle agente titulo estado min_sin_salida resto; do
     [[ -z "$handle" ]] && continue
+    if [[ -n "${resto:-}" || -z "${min_sin_salida:-}" || -z "${estado:-}" ]]; then
+      echo "Error: fila TSV malformada de quien-trabaja.sh" >&2
+      exit 1
+    fi
+    case "$estado" in
+      libre|trabajando|esperando-reset|trabado)
+        ;;
+      *)
+        echo "Error: estado desconocido '$estado' en salida de quien-trabaja.sh" >&2
+        exit 1
+        ;;
+    esac
     if [[ "$estado" != "libre" ]]; then
       no_libres+="${handle}"$'\t'"${agente}"$'\t'"${titulo}"$'\t'"${estado}"$'\t'"${min_sin_salida}"$'\n'
     fi

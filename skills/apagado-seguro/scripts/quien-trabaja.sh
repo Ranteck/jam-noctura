@@ -8,17 +8,12 @@ clasificar() {
   local ultima_salida="${4:-0}"
   local ahora="${5:-$(date +%s)}"
 
-  # a. idle=no → trabado si min_sin_salida >= 60, si no trabajando (el mensaje de límite no importa si la TUI está ocupada).
-  if [[ "$idle" == "no" ]]; then
-    if (( min_sin_salida >= 60 )); then
-      echo "trabado"
-    else
-      echo "trabajando"
-    fi
-    return 0
+  local target_tz="${TZ:-America/Argentina/Buenos_Aires}"
+  if [[ "$preview" =~ \(([A-Za-z_]+/[A-Za-z0-9_/-]+)\) ]]; then
+    target_tz="${BASH_REMATCH[1]}"
   fi
 
-  # b. idle=si y el preview tiene una frase de límite (sin distinguir mayúsculas: try again at, limit reached, hit your ([a-z0-9-]+ )?limit)
+  # b. el preview tiene una frase de límite (sin distinguir mayúsculas: try again at, limit reached, hit your ([a-z0-9-]+ )?limit)
   local lower_preview
   lower_preview=$(tr "[:upper:]" "[:lower:]" <<< "$preview" | tr '\r\n\t' ' ' | tr -s ' ')
 
@@ -44,7 +39,7 @@ clasificar() {
     fi
 
     local months="jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december"
-    local date_time_pattern="^[ :·•\t,.:-]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]+([0-9]{4}))?([,]?[ ]*(at)?[ ]+))?([0-9]{1,2}:[0-9]{2}([ ]*(am|pm))?|[0-9]{1,2}[ ]*(am|pm))"
+    local date_time_pattern="^[ :·•\t,.:-]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]+([0-9]{4}))?([,]?[ ]*(at)?[ ]+))?([0-9]{1,2}:[0-9]{2}(:[0-9]{2})?[ ]*(am|pm)|[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?|[0-9]{1,2}[ ]*(am|pm))([^0-9a-zA-Z]|$)"
 
     local base="$ultima_salida"
     if (( base <= 0 )); then
@@ -60,24 +55,25 @@ clasificar() {
 
       if [[ -n "$month" && -n "$day" ]]; then
         if [[ -n "$year" ]]; then
-          reset_epoch=$(date -d "$month $day $year $hora" +%s 2>/dev/null || true)
+          reset_epoch=$(TZ="$target_tz" date -d "$month $day $year $hora" +%s 2>/dev/null || true)
         else
           local year_base
-          year_base=$(date -d "@$base" +%Y 2>/dev/null || true)
+          year_base=$(TZ="$target_tz" date -d "@$base" +%Y 2>/dev/null || true)
           if [[ -n "$year_base" ]]; then
-            reset_epoch=$(date -d "$month $day $year_base $hora" +%s 2>/dev/null || true)
+            reset_epoch=$(TZ="$target_tz" date -d "$month $day $year_base $hora" +%s 2>/dev/null || true)
             if [[ -n "$reset_epoch" ]] && (( reset_epoch < base )); then
-              reset_epoch=$(date -d "$month $day $((year_base + 1)) $hora" +%s 2>/dev/null || true)
+              reset_epoch=$(TZ="$target_tz" date -d "$month $day $((year_base + 1)) $hora" +%s 2>/dev/null || true)
             fi
           fi
         fi
       elif [[ -n "$hora" ]]; then
-        local date_base
-        date_base=$(date -d "@$base" +%Y-%m-%d 2>/dev/null || true)
-        if [[ -n "$date_base" ]]; then
-          reset_epoch=$(date -d "$date_base $hora" +%s 2>/dev/null || true)
+        local cur_date next_date
+        cur_date=$(TZ="$target_tz" date -d "@$base" +%Y-%m-%d 2>/dev/null || true)
+        next_date=$(TZ="$target_tz" date -d "$cur_date + 1 day" +%Y-%m-%d 2>/dev/null || true)
+        if [[ -n "$cur_date" ]]; then
+          reset_epoch=$(TZ="$target_tz" date -d "$cur_date $hora" +%s 2>/dev/null || true)
           if [[ -n "$reset_epoch" ]] && (( reset_epoch <= base )); then
-            reset_epoch=$(( reset_epoch + 86400 ))
+            reset_epoch=$(TZ="$target_tz" date -d "$next_date $hora" +%s 2>/dev/null || true)
           fi
         fi
       fi
@@ -88,16 +84,24 @@ clasificar() {
       reset_epoch=$(( base + 5 * 3600 ))
     fi
 
-    # esperando-reset si ahora < reset + 15 min; si no, libre (ya debería haber vuelto: nadie lo va a retomar).
+    # Si hay aviso de límite pendiente (ahora < reset + 15 min), esperando-reset manda
     if (( ahora < reset_epoch + 15 * 60 )); then
       echo "esperando-reset"
+      return 0
+    fi
+  fi
+
+  # a. idle=no → trabado si min_sin_salida >= 60, si no trabajando.
+  if [[ "$idle" == "no" ]]; then
+    if (( min_sin_salida >= 60 )); then
+      echo "trabado"
     else
-      echo "libre"
+      echo "trabajando"
     fi
     return 0
   fi
 
-  # c. idle=si sin frase de límite → libre.
+  # c. idle=si y sin aviso de límite pendiente → libre.
   echo "libre"
 }
 
@@ -132,11 +136,34 @@ main() {
     [[ -z "$term" ]] && continue
     local handle agente titulo last_output_ms preview min_sin_salida idle wait_out estado clean_titulo last_output_s
 
+    # F02: handle y agentIdentity no vacíos y sin caracteres de control
+    if ! echo "$term" | jq -e '
+      (.handle | (type == "string" and length > 0 and (test("[\\x00-\\x1f]") | not))) and
+      (.agentIdentity | (type == "string" and length > 0 and (test("[\\x00-\\x1f]") | not)))
+    ' >/dev/null 2>&1; then
+      echo "Error: terminal con handle o agentIdentity inválido o con caracteres de control" >&2
+      exit 1
+    fi
+
+    # F11, F01: lastOutputAt solo entero JSON dentro de rango razonable
+    if ! echo "$term" | jq -e '
+      .lastOutputAt == null or
+      (.lastOutputAt | (type == "number" and . >= 0 and . <= 10000000000000 and . == floor))
+    ' >/dev/null 2>&1; then
+      echo "Error: lastOutputAt inválido (debe ser número entero positivo)" >&2
+      exit 1
+    fi
+
     handle=$(jq -r '.handle' <<< "$term")
     agente=$(jq -r '.agentIdentity' <<< "$term")
     titulo=$(jq -r '.title // ""' <<< "$term")
     last_output_ms=$(jq -r '.lastOutputAt // 0' <<< "$term")
     preview=$(jq -r '.preview // ""' <<< "$term")
+
+    # F01: si lastOutputAt vino en segundos (entre 1e9 y 1e11), normalizar a ms
+    if (( last_output_ms > 0 && last_output_ms < 100000000000 )); then
+      last_output_ms=$(( last_output_ms * 1000 ))
+    fi
 
     if (( last_output_ms > 0 )); then
       last_output_s=$(( last_output_ms / 1000 ))
@@ -150,7 +177,7 @@ main() {
 
     idle="no"
     wait_out=$("$ORCA" terminal wait --terminal "$handle" --for tui-idle --timeout-ms 2000 --json 2>/dev/null || true)
-    if [[ -n "$wait_out" ]] && echo "$wait_out" | jq -e '.ok and .result.wait.satisfied == true' >/dev/null 2>&1; then
+    if [[ -n "$wait_out" ]] && echo "$wait_out" | jq -e '.ok == true and .result.wait.satisfied == true' >/dev/null 2>&1; then
       idle="si"
     fi
 
