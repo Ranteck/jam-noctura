@@ -1038,6 +1038,11 @@ apagar_z02_code=$?
 set -e
 assert_eq "$apagar_z02_code" "3" "Z02: separador ' · ' antes del paréntesis reconoce Buenos Aires y sale 3"
 
+# S01: una letra 't' no es separador; la zona Tokio se ignora y rige la del sistema (Buenos Aires: reset 17:00 UTC)
+res_s01=$(TZ="America/Argentina/Buenos_Aires" clasificar si 0 "Try again at 2pm t(Asia/Tokyo)" \
+  "$(TZ=UTC date -d '2026-11-05 00:00:00' +%s)" "$(TZ=UTC date -d '2026-11-05 12:00:00' +%s)")
+assert_eq "$res_s01" "esperando-reset" "S01: la letra 't' antes del paréntesis no adjunta la zona"
+
 if [[ $failures -eq 0 ]]; then
   echo "TODOS LOS TESTS PASARON EXITOSAMENTE."
   exit 0

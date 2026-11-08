@@ -62,7 +62,7 @@ clasificar() {
         dt_end=$(( matched_len - 1 ))
       fi
       local rest="${raw_after_anchor:dt_end}"
-      local sep_paren_rx="^[ ·•∙,.\t:-]*\(([A-Za-z_]+/[A-Za-z0-9_/-]+)\)"
+      local sep_paren_rx="^[ ·•∙,.:-]*\(([A-Za-z_]+/[A-Za-z0-9_/-]+)\)"
       if [[ "$rest" =~ $sep_paren_rx ]]; then
         notice_tz="${BASH_REMATCH[1]}"
       fi
