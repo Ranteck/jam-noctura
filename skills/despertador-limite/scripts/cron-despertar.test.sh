@@ -60,6 +60,10 @@ assert_eq "hora suelta pasada '3am' con margen 15 -> 15 3 6 11 *" "15 3 6 11 *" 
 salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "14:10" "08")
 assert_eq "F07: margen con cero '08' -> 18 14 5 11 *" "18 14 5 11 *" "$salida"
 
+# E03: Margen con ceros a la izquierda de más de 4 dígitos ('00008') tratado como 8 decimal
+salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "14:10" "00008")
+assert_eq "E03: margen '00008' tratado como 8 -> 18 14 5 11 *" "18 14 5 11 *" "$salida"
+
 # 5. uso-claude.sh sin credenciales sale con 1 y emite mensaje a stderr
 empty_dir=$(mktemp -d)
 trap 'rm -rf "$empty_dir"' EXIT

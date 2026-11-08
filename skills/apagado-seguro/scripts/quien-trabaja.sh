@@ -25,33 +25,65 @@ clasificar() {
 
   local tail=""
   local raw_tail=""
-  local notice_tz=""
+  local raw_prefix=""
+  local prefix_40=""
   local limit_pattern="(.*)(try again at|limit reached|hit your ([a-z0-9-]+ )?limit)"
   if [[ "$lower_preview" =~ $limit_pattern ]]; then
     local prefix="${BASH_REMATCH[1]}"
     tail="${lower_preview:${#prefix}}"
     raw_tail="${norm_preview:${#prefix}}"
-    if [[ "$raw_tail" =~ \(([A-Za-z_]+/[A-Za-z0-9_/-]+)\) ]]; then
-      notice_tz="${BASH_REMATCH[1]}"
-    fi
+    raw_prefix="${norm_preview:0:${#prefix}}"
+    prefix_40="${raw_prefix: ( ${#raw_prefix} > 40 ? ${#raw_prefix} - 40 : 0 )}"
   fi
 
   if [[ -n "$tail" ]]; then
     local after_anchor=""
+    local anchor_len=0
     if [[ "$tail" == "try again at"* ]]; then
       after_anchor="${tail#try again at}"
+      anchor_len=$(( ${#tail} - ${#after_anchor} ))
     else
       local first50="${tail:0:50}"
       if [[ "$first50" =~ (resets at|reset at|resets) ]]; then
         local kw="${BASH_REMATCH[1]}"
         local pre="${first50%%"$kw"*}"
-        local offset=$(( ${#pre} + ${#kw} ))
-        after_anchor="${tail:offset}"
+        anchor_len=$(( ${#pre} + ${#kw} ))
+        after_anchor="${tail:anchor_len}"
       fi
     fi
 
     local months="jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december"
     local date_time_pattern="^[ :·•\t,.:-]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]+([0-9]{4}))?([,]?[ ]*(at)?[ ]+))?([0-9]{1,2}:[0-9]{2}(:[0-9]{2})?[ ]*(am|pm)|[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?|[0-9]{1,2}[ ]*(am|pm))([^0-9a-zA-Z]|$)"
+
+    local notice_tz=""
+    local raw_after_anchor="${raw_tail:anchor_len}"
+    local raw_tail_window="$raw_tail"
+    if [[ -n "$after_anchor" && "$after_anchor" =~ $date_time_pattern ]]; then
+      local matched_len=${#BASH_REMATCH[0]}
+      local last_char="${after_anchor:matched_len-1:1}"
+      local dt_end=$matched_len
+      local rest=""
+      if [[ "$last_char" == "(" ]]; then
+        dt_end=$(( matched_len - 1 ))
+        rest="${raw_after_anchor:dt_end}"
+      else
+        rest="${raw_after_anchor:dt_end}"
+      fi
+      local rx="^[ ]*\\([^)]+\\)"
+      local paren=""
+      if [[ "$rest" =~ $rx ]]; then
+        paren="${BASH_REMATCH[0]}"
+      fi
+      local window="${raw_after_anchor:0:$(( dt_end + ${#paren} ))}"
+      raw_tail_window="${raw_tail:0:$anchor_len}${window}"
+    fi
+
+    local tz_rx="\(([A-Za-z_]+/[A-Za-z0-9_/-]+)\)"
+    if [[ "$raw_tail_window" =~ $tz_rx ]]; then
+      notice_tz="${BASH_REMATCH[1]}"
+    elif [[ "$prefix_40" =~ $tz_rx ]]; then
+      notice_tz="${BASH_REMATCH[1]}"
+    fi
 
     local base="$ultima_salida"
     if (( base <= 0 )); then
@@ -86,25 +118,26 @@ clasificar() {
           local reset_today reset_tomorrow
           reset_today=$(_date_with_tz "$notice_tz" -d "$cur_date $hora" +%s 2>/dev/null || true)
           reset_tomorrow=$(_date_with_tz "$notice_tz" -d "$next_date $hora" +%s 2>/dev/null || true)
-          if [[ -n "$reset_today" ]]; then
-            if (( reset_today > base )); then
-              reset_epoch="$reset_today"
+          if [[ -n "$reset_today" && -n "$reset_tomorrow" ]]; then
+            if (( ultima_salida > 0 )); then
+              if (( reset_today > base )); then
+                reset_epoch="$reset_today"
+              else
+                reset_epoch="$reset_tomorrow"
+              fi
             else
-              if (( ultima_salida > 0 )); then
+              # con ultima_salida=0 y hora sin fecha: elegir la ocurrencia más cercana a ahora
+              local dist_today dist_tomorrow
+              dist_today=$(( ahora >= reset_today ? ahora - reset_today : reset_today - ahora ))
+              dist_tomorrow=$(( ahora >= reset_tomorrow ? ahora - reset_tomorrow : reset_tomorrow - ahora ))
+              if (( dist_tomorrow < dist_today )); then
                 reset_epoch="$reset_tomorrow"
               else
-                # Si el aviso anclado en la cola contiene 'weekly', programar SIEMPRE para mañana
-                if [[ "$tail" =~ weekly ]]; then
-                  reset_epoch="$reset_tomorrow"
-                # con ultima_salida=0 y hora sin fecha: si la hora de hoy ya pasó,
-                # usar mañana SOLO si queda a 5 h o menos de ahora; si no, hoy (y se libera a reset+15).
-                elif [[ -n "$reset_tomorrow" ]] && (( reset_tomorrow - ahora <= 5 * 3600 )); then
-                  reset_epoch="$reset_tomorrow"
-                else
-                  reset_epoch="$reset_today"
-                fi
+                reset_epoch="$reset_today"
               fi
             fi
+          elif [[ -n "$reset_today" ]]; then
+            reset_epoch="$reset_today"
           fi
         fi
       fi

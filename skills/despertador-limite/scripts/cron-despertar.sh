@@ -9,10 +9,18 @@ fi
 hora_input="$1"
 margen_min="${2:-12}"
 
-if ! [[ "$margen_min" =~ ^[0-9]{1,4}$ ]] || [ "$((10#$margen_min))" -gt 1440 ]; then
+if ! [[ "$margen_min" =~ ^[0-9]+$ ]]; then
     echo "Error: margen_min debe ser un número entero entre 0 y 1440: $margen_min" >&2
     exit 1
 fi
+
+margen_min_sin_ceros="${margen_min#"${margen_min%%[!0]*}"}"
+margen_val="${margen_min_sin_ceros:-0}"
+if (( ${#margen_val} > 4 )) || (( margen_val > 1440 )); then
+    echo "Error: margen_min debe ser un número entero entre 0 y 1440: $margen_min" >&2
+    exit 1
+fi
+margen_min="$margen_val"
 
 now_epoch="${AHORA_EPOCH:-$(date +%s)}"
 year_now=$(date -d "@$now_epoch" +%Y 2>/dev/null)

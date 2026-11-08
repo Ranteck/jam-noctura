@@ -937,6 +937,53 @@ apagar_n02_code=$?
 set -e
 assert_eq "$apagar_n02_code" "3" "N02: zona horaria del aviso anclado (America/Argentina/Buenos_Aires) se usa y sale 3"
 
+# === Regresiones E01 y E02 ===
+# E01: Los tres formatos de aviso semanal sin fecha con lastOutputAt=null a las 22:00 salen 3 (esperando-reset)
+for e01_preview in \
+  "Weekly limit reached · resets 4am" \
+  "You've hit your weekly limit. Try again at 4am" \
+  "You've hit your weekly limit · resets 4am"; do
+  cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_e01",
+        "agentIdentity": "claude",
+        "title": "E01 weekly variant",
+        "recordedPaneKey": "tab_e01:leaf_e01",
+        "lastOutputAt": null,
+        "preview": "$e01_preview"
+      }
+    ]
+  }
+}
+EOF
+  echo "term_e01:idle" > "$MOCK_STATE/idle_status.txt"
+  set +e
+  apagar_e01_out=$(AHORA_EPOCH="$ep_n01_now" "$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+  apagar_e01_code=$?
+  set -e
+  assert_eq "$apagar_e01_code" "3" "E01: '$e01_preview' sale 3 esperando reset a las 22:00"
+done
+
+# E02: statusline semanal posterior a la hora no convierte aviso de sesión en semanal -> libre a las 15:00
+res_e02=$(clasificar si 0 "You've hit your session limit · resets 2:10pm"$'\n'"Weekly usage: 30%" 0 "$ep_05_1500")
+assert_eq "$res_e02" "libre" "E02: statusline weekly posterior a hora no afecta aviso de sesión -> libre a las 15:00"
+
+# === Regresiones B01 y B03 ===
+# B01: aviso semanal con lastOutputAt=0 tras pasar reset+15 (ej. 04:30) debe dar libre
+ep_b01_now=$(date -d "2026-11-05 04:30:00" +%s)
+res_b01=$(clasificar si 0 "You have hit your weekly limit · resets 4am" 0 "$ep_b01_now")
+assert_eq "$res_b01" "libre" "B01: aviso semanal a las 04:30 (reset+15 vencido) -> libre"
+
+# B03: zona antes de Try again at se extrae del aviso anclado; a las 15:00 UTC espera reset 2:10 PM Buenos Aires (17:10 UTC)
+ep_b03_base=$(TZ="UTC" date -d "2026-11-05 10:00:00" +%s)
+ep_b03_now=$(TZ="UTC" date -d "2026-11-05 15:00:00" +%s)
+res_b03=$(TZ="UTC" clasificar si 0 "You have hit your limit (America/Argentina/Buenos_Aires). Try again at 2:10 PM" "$ep_b03_base" "$ep_b03_now")
+assert_eq "$res_b03" "esperando-reset" "B03: zona antes de Try again at extraída correctamente -> esperando-reset"
+
 if [[ $failures -eq 0 ]]; then
   echo "TODOS LOS TESTS PASARON EXITOSAMENTE."
   exit 0
