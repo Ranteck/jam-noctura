@@ -978,11 +978,65 @@ ep_b01_now=$(date -d "2026-11-05 04:30:00" +%s)
 res_b01=$(clasificar si 0 "You have hit your weekly limit · resets 4am" 0 "$ep_b01_now")
 assert_eq "$res_b01" "libre" "B01: aviso semanal a las 04:30 (reset+15 vencido) -> libre"
 
-# B03: zona antes de Try again at se extrae del aviso anclado; a las 15:00 UTC espera reset 2:10 PM Buenos Aires (17:10 UTC)
+# B03: zona antes de Try again at no aparece en avisos reales; la zona solo va inmediatamente tras la hora -> usa zona del sistema (UTC) y sale libre
 ep_b03_base=$(TZ="UTC" date -d "2026-11-05 10:00:00" +%s)
 ep_b03_now=$(TZ="UTC" date -d "2026-11-05 15:00:00" +%s)
 res_b03=$(TZ="UTC" clasificar si 0 "You have hit your limit (America/Argentina/Buenos_Aires). Try again at 2:10 PM" "$ep_b03_base" "$ep_b03_now")
-assert_eq "$res_b03" "esperando-reset" "B03: zona antes de Try again at extraída correctamente -> esperando-reset"
+assert_eq "$res_b03" "libre" "B03: zona antes de Try again at ignorada (usa zona del sistema UTC) -> libre"
+
+# === Regresiones Z01 y Z02 ===
+# Z01: aviso anterior con zona no contamina último aviso sin zona (usa zona del sistema Buenos Aires)
+ep_z01_now=$(TZ="UTC" date -d "2026-11-05 12:00:00" +%s)
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_z01",
+        "agentIdentity": "claude",
+        "title": "Z01 previous notice tz",
+        "recordedPaneKey": "tab_z01:leaf_z01",
+        "lastOutputAt": 0,
+        "preview": "Try again at 2pm (Asia/Tokyo)\nTry again at 2pm"
+      }
+    ]
+  }
+}
+EOF
+echo "term_z01:idle" > "$MOCK_STATE/idle_status.txt"
+set +e
+apagar_z01_out=$(TZ="America/Argentina/Buenos_Aires" AHORA_EPOCH="$ep_z01_now" "$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_z01_code=$?
+set -e
+assert_eq "$apagar_z01_code" "3" "Z01: último aviso sin zona usa zona del sistema (Buenos Aires) y sale 3"
+
+# Z02: separador ' · ' antes del paréntesis no descarta zona explícita
+ep_z02_now=$(TZ="UTC" date -d "2026-11-05 15:00:00" +%s)
+ep_z02_last=$(TZ="UTC" date -d "2026-11-05 10:00:00" +%s)
+cat << EOF > "$MOCK_STATE/terminal_list.json"
+{
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_z02",
+        "agentIdentity": "claude",
+        "title": "Z02 dot separator",
+        "recordedPaneKey": "tab_z02:leaf_z02",
+        "lastOutputAt": $(( ep_z02_last * 1000 )),
+        "preview": "Try again at 2pm · (America/Argentina/Buenos_Aires)"
+      }
+    ]
+  }
+}
+EOF
+echo "term_z02:idle" > "$MOCK_STATE/idle_status.txt"
+set +e
+apagar_z02_out=$(TZ="UTC" AHORA_EPOCH="$ep_z02_now" "$SCRIPT_DIR/apagar.sh" --simulacro 2>&1)
+apagar_z02_code=$?
+set -e
+assert_eq "$apagar_z02_code" "3" "Z02: separador ' · ' antes del paréntesis reconoce Buenos Aires y sale 3"
 
 if [[ $failures -eq 0 ]]; then
   echo "TODOS LOS TESTS PASARON EXITOSAMENTE."

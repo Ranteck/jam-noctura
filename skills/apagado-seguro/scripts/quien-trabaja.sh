@@ -25,15 +25,11 @@ clasificar() {
 
   local tail=""
   local raw_tail=""
-  local raw_prefix=""
-  local prefix_40=""
   local limit_pattern="(.*)(try again at|limit reached|hit your ([a-z0-9-]+ )?limit)"
   if [[ "$lower_preview" =~ $limit_pattern ]]; then
     local prefix="${BASH_REMATCH[1]}"
     tail="${lower_preview:${#prefix}}"
     raw_tail="${norm_preview:${#prefix}}"
-    raw_prefix="${norm_preview:0:${#prefix}}"
-    prefix_40="${raw_prefix: ( ${#raw_prefix} > 40 ? ${#raw_prefix} - 40 : 0 )}"
   fi
 
   if [[ -n "$tail" ]]; then
@@ -57,32 +53,19 @@ clasificar() {
 
     local notice_tz=""
     local raw_after_anchor="${raw_tail:anchor_len}"
-    local raw_tail_window="$raw_tail"
     if [[ -n "$after_anchor" && "$after_anchor" =~ $date_time_pattern ]]; then
       local matched_len=${#BASH_REMATCH[0]}
-      local last_char="${after_anchor:matched_len-1:1}"
       local dt_end=$matched_len
-      local rest=""
-      if [[ "$last_char" == "(" ]]; then
+      local last_char="${after_anchor:matched_len-1:1}"
+      local delim_rx="[^0-9a-zA-Z]"
+      if [[ "$last_char" =~ $delim_rx ]]; then
         dt_end=$(( matched_len - 1 ))
-        rest="${raw_after_anchor:dt_end}"
-      else
-        rest="${raw_after_anchor:dt_end}"
       fi
-      local rx="^[ ]*\\([^)]+\\)"
-      local paren=""
-      if [[ "$rest" =~ $rx ]]; then
-        paren="${BASH_REMATCH[0]}"
+      local rest="${raw_after_anchor:dt_end}"
+      local sep_paren_rx="^[ ·•∙,.\t:-]*\(([A-Za-z_]+/[A-Za-z0-9_/-]+)\)"
+      if [[ "$rest" =~ $sep_paren_rx ]]; then
+        notice_tz="${BASH_REMATCH[1]}"
       fi
-      local window="${raw_after_anchor:0:$(( dt_end + ${#paren} ))}"
-      raw_tail_window="${raw_tail:0:$anchor_len}${window}"
-    fi
-
-    local tz_rx="\(([A-Za-z_]+/[A-Za-z0-9_/-]+)\)"
-    if [[ "$raw_tail_window" =~ $tz_rx ]]; then
-      notice_tz="${BASH_REMATCH[1]}"
-    elif [[ "$prefix_40" =~ $tz_rx ]]; then
-      notice_tz="${BASH_REMATCH[1]}"
     fi
 
     local base="$ultima_salida"
