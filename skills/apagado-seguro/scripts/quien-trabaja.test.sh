@@ -1043,6 +1043,13 @@ res_s01=$(TZ="America/Argentina/Buenos_Aires" clasificar si 0 "Try again at 2pm 
   "$(TZ=UTC date -d '2026-11-05 00:00:00' +%s)" "$(TZ=UTC date -d '2026-11-05 12:00:00' +%s)")
 assert_eq "$res_s01" "esperando-reset" "S01: la letra 't' antes del paréntesis no adjunta la zona"
 
+# D01: 't' o barra invertida antes de la hora no la vuelven legible; rige el fallback última salida + 5 h
+for d01_aviso in 'Try again at t2pm' 'Try again at \2pm'; do
+  res_d01=$(TZ="America/Argentina/Buenos_Aires" clasificar si 0 "$d01_aviso" \
+    "$(TZ=America/Argentina/Buenos_Aires date -d '2026-11-05 13:00' +%s)" "$(TZ=America/Argentina/Buenos_Aires date -d '2026-11-05 15:00' +%s)")
+  assert_eq "$res_d01" "esperando-reset" "D01: '$d01_aviso' usa el fallback +5 h"
+done
+
 if [[ $failures -eq 0 ]]; then
   echo "TODOS LOS TESTS PASARON EXITOSAMENTE."
   exit 0

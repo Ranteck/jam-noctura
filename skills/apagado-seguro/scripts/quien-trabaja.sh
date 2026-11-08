@@ -49,7 +49,7 @@ clasificar() {
     fi
 
     local months="jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december"
-    local date_time_pattern="^[ :·•\t,.:-]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]+([0-9]{4}))?([,]?[ ]*(at)?[ ]+))?([0-9]{1,2}:[0-9]{2}(:[0-9]{2})?[ ]*(am|pm)|[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?|[0-9]{1,2}[ ]*(am|pm))([^0-9a-zA-Z]|$)"
+    local date_time_pattern="^[ :·•,.:-]*((($months))[ ]+([0-9]{1,2})(st|nd|rd|th)?([,]?[ ]+([0-9]{4}))?([,]?[ ]*(at)?[ ]+))?([0-9]{1,2}:[0-9]{2}(:[0-9]{2})?[ ]*(am|pm)|[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?|[0-9]{1,2}[ ]*(am|pm))([^0-9a-zA-Z]|$)"
 
     local notice_tz=""
     local raw_after_anchor="${raw_tail:anchor_len}"
