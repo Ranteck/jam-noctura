@@ -207,6 +207,72 @@ ep_f10_now=$(TZ="$TZ" date -d "2026-11-05 10:00:00" +%s)
 res=$(clasificar no 120 "You've hit your session limit · resets 2pm" "$ep_f10_base" "$ep_f10_now")
 assert_eq "$res" "esperando-reset" "F10: aviso de límite pendiente a las 2pm manda sobre idle=no y 120 min -> esperando-reset"
 
+echo "=== Tests de zona del sistema sin zona en aviso ==="
+# 1. Con TZ=UTC exportado y un aviso sin zona 'You've hit your session limit · resets 2:40pm',
+# última salida 05/11/2026 10:00 UTC -> esperando-reset a 14:50 UTC y libre a 14:56 UTC
+ep_tz_utc_base=$(TZ=UTC date -d "2026-11-05 10:00:00" +%s)
+ep_tz_utc_1450=$(TZ=UTC date -d "2026-11-05 14:50:00" +%s)
+ep_tz_utc_1456=$(TZ=UTC date -d "2026-11-05 14:56:00" +%s)
+preview_no_tz="You've hit your session limit · resets 2:40pm"
+
+res_utc_1450=$(TZ=UTC clasificar si 0 "$preview_no_tz" "$ep_tz_utc_base" "$ep_tz_utc_1450")
+assert_eq "$res_utc_1450" "esperando-reset" "TZ=UTC sin zona en aviso: 14:50 UTC -> esperando-reset"
+
+res_utc_1456=$(TZ=UTC clasificar si 0 "$preview_no_tz" "$ep_tz_utc_base" "$ep_tz_utc_1456")
+assert_eq "$res_utc_1456" "libre" "TZ=UTC sin zona en aviso: 14:56 UTC -> libre"
+
+# 2. Con TZ sin definir (env -u TZ) que use la zona del sistema
+res_sys_1450=$(env -u TZ bash -c '
+  source "'"$SCRIPT_DIR"'/quien-trabaja.sh"
+  preview="You'\''ve hit your session limit · resets 2:40pm"
+  base=$(date -d "2026-11-05 10:00:00" +%s)
+  now_esp=$(date -d "2026-11-05 14:50:00" +%s)
+  clasificar si 0 "$preview" "$base" "$now_esp"
+')
+assert_eq "$res_sys_1450" "esperando-reset" "env -u TZ sin zona en aviso: 14:50 local -> esperando-reset"
+
+res_sys_1456=$(env -u TZ bash -c '
+  source "'"$SCRIPT_DIR"'/quien-trabaja.sh"
+  preview="You'\''ve hit your session limit · resets 2:40pm"
+  base=$(date -d "2026-11-05 10:00:00" +%s)
+  now_lib=$(date -d "2026-11-05 14:56:00" +%s)
+  clasificar si 0 "$preview" "$base" "$now_lib"
+')
+assert_eq "$res_sys_1456" "libre" "env -u TZ sin zona en aviso: 14:56 local -> libre"
+
+# 3. Verificar que si TZ no está definida, no se pasa TZ al comando date ni se hardcodea una zona fija
+mock_date_dir=$(mktemp -d)
+cat << EOF > "$mock_date_dir/date"
+#!/usr/bin/env bash
+if [[ -n "\${TZ+x}" ]]; then
+  echo "SET:\$TZ" >> "$mock_date_dir/calls.log"
+else
+  echo "UNSET" >> "$mock_date_dir/calls.log"
+fi
+exec /usr/bin/date "\$@"
+EOF
+chmod +x "$mock_date_dir/date"
+
+env -u TZ PATH="$mock_date_dir:$PATH" bash -c '
+  source "'"$SCRIPT_DIR"'/quien-trabaja.sh"
+  clasificar si 0 "You'\''ve hit your session limit · resets 2:40pm" 1793872800 1793890560 >/dev/null
+'
+
+if grep -q "^SET:" "$mock_date_dir/calls.log" 2>/dev/null; then
+  echo "FAIL: clasificar fijó TZ='$(head -n 1 "$mock_date_dir/calls.log")' cuando TZ no estaba definida y el aviso no traía zona" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: clasificar no exportó TZ cuando no estaba definida y el aviso no traía zona"
+fi
+rm -rf "$mock_date_dir"
+
+if grep -q "America/Argentina/Buenos_Aires" "$SCRIPT_DIR/quien-trabaja.sh"; then
+  echo "FAIL: quien-trabaja.sh contiene zona horaria hardcodeada America/Argentina/Buenos_Aires" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: quien-trabaja.sh no contiene zona horaria hardcodeada"
+fi
+
 
 echo "=== Tests de integración: quien-trabaja.sh y apagar.sh con mock orca ==="
 

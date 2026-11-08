@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+_date_with_tz() {
+  local tz="${1:-}"
+  shift
+  if [[ -n "$tz" ]]; then
+    TZ="$tz" date "$@"
+  else
+    date "$@"
+  fi
+}
+
 clasificar() {
   local idle="$1"
   local min_sin_salida="$2"
@@ -8,9 +18,9 @@ clasificar() {
   local ultima_salida="${4:-0}"
   local ahora="${5:-$(date +%s)}"
 
-  local target_tz="${TZ:-America/Argentina/Buenos_Aires}"
+  local notice_tz=""
   if [[ "$preview" =~ \(([A-Za-z_]+/[A-Za-z0-9_/-]+)\) ]]; then
-    target_tz="${BASH_REMATCH[1]}"
+    notice_tz="${BASH_REMATCH[1]}"
   fi
 
   # b. el preview tiene una frase de límite (sin distinguir mayúsculas: try again at, limit reached, hit your ([a-z0-9-]+ )?limit)
@@ -55,25 +65,25 @@ clasificar() {
 
       if [[ -n "$month" && -n "$day" ]]; then
         if [[ -n "$year" ]]; then
-          reset_epoch=$(TZ="$target_tz" date -d "$month $day $year $hora" +%s 2>/dev/null || true)
+          reset_epoch=$(_date_with_tz "$notice_tz" -d "$month $day $year $hora" +%s 2>/dev/null || true)
         else
           local year_base
-          year_base=$(TZ="$target_tz" date -d "@$base" +%Y 2>/dev/null || true)
+          year_base=$(_date_with_tz "$notice_tz" -d "@$base" +%Y 2>/dev/null || true)
           if [[ -n "$year_base" ]]; then
-            reset_epoch=$(TZ="$target_tz" date -d "$month $day $year_base $hora" +%s 2>/dev/null || true)
+            reset_epoch=$(_date_with_tz "$notice_tz" -d "$month $day $year_base $hora" +%s 2>/dev/null || true)
             if [[ -n "$reset_epoch" ]] && (( reset_epoch < base )); then
-              reset_epoch=$(TZ="$target_tz" date -d "$month $day $((year_base + 1)) $hora" +%s 2>/dev/null || true)
+              reset_epoch=$(_date_with_tz "$notice_tz" -d "$month $day $((year_base + 1)) $hora" +%s 2>/dev/null || true)
             fi
           fi
         fi
       elif [[ -n "$hora" ]]; then
         local cur_date next_date
-        cur_date=$(TZ="$target_tz" date -d "@$base" +%Y-%m-%d 2>/dev/null || true)
-        next_date=$(TZ="$target_tz" date -d "$cur_date + 1 day" +%Y-%m-%d 2>/dev/null || true)
+        cur_date=$(_date_with_tz "$notice_tz" -d "@$base" +%Y-%m-%d 2>/dev/null || true)
+        next_date=$(_date_with_tz "$notice_tz" -d "$cur_date + 1 day" +%Y-%m-%d 2>/dev/null || true)
         if [[ -n "$cur_date" ]]; then
-          reset_epoch=$(TZ="$target_tz" date -d "$cur_date $hora" +%s 2>/dev/null || true)
+          reset_epoch=$(_date_with_tz "$notice_tz" -d "$cur_date $hora" +%s 2>/dev/null || true)
           if [[ -n "$reset_epoch" ]] && (( reset_epoch <= base )); then
-            reset_epoch=$(TZ="$target_tz" date -d "$next_date $hora" +%s 2>/dev/null || true)
+            reset_epoch=$(_date_with_tz "$notice_tz" -d "$next_date $hora" +%s 2>/dev/null || true)
           fi
         fi
       fi
