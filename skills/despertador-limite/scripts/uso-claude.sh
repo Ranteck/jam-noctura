@@ -27,8 +27,15 @@ if ! response=$(printf 'Authorization: Bearer %s\n' "$token" | curl -sS --fail -
     exit 1
 fi
 
-if ! echo "$response" | jq -e '.five_hour and .seven_day' >/dev/null 2>&1; then
-    echo "Error: respuesta inválida o sin datos de rate limit de Anthropic" >&2
+if ! echo "$response" | jq -e '
+  (.five_hour | type == "object") and
+  (.seven_day | type == "object") and
+  (.five_hour.utilization | (type == "number" and . >= 0 and . <= 100)) and
+  (.seven_day.utilization | (type == "number" and . >= 0 and . <= 100)) and
+  (.five_hour.resets_at | (type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}"))) and
+  (.seven_day.resets_at | (type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}")))
+' >/dev/null 2>&1; then
+    echo "Error: respuesta inválida o sin datos válidos de rate limit de Anthropic" >&2
     exit 1
 fi
 

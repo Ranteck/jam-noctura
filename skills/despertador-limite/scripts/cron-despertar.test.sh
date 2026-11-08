@@ -33,9 +33,17 @@ assert_eq "hora suelta hoy '2:10 PM' -> 22 14 5 11 *" "22 14 5 11 *" "$salida"
 salida=$(AHORA_EPOCH="$EPOCH_1500" "$CRON_DESPERTAR" "2:10 PM")
 assert_eq "hora suelta pasada '2:10 PM' -> 22 14 6 11 *" "22 14 6 11 *" "$salida"
 
+# F03: Hora suelta en formato 24h que ya pasó ("14:10" desde las 15:00) -> mañana 14:22
+salida=$(AHORA_EPOCH="$EPOCH_1500" "$CRON_DESPERTAR" "14:10")
+assert_eq "F03: hora suelta pasada 24h '14:10' -> 22 14 6 11 *" "22 14 6 11 *" "$salida"
+
 # 4. Hora suelta que ya pasó ("3am" desde las 09:00) con margen 15 -> mañana 03:15
 salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "3am" 15)
 assert_eq "hora suelta pasada '3am' con margen 15 -> 15 3 6 11 *" "15 3 6 11 *" "$salida"
+
+# F07: Margen con cero a la izquierda ("08") debe tratarse en base decimal (14:10 + 8 min -> 14:18)
+salida=$(AHORA_EPOCH="$EPOCH_0900" "$CRON_DESPERTAR" "14:10" "08")
+assert_eq "F07: margen con cero '08' -> 18 14 5 11 *" "18 14 5 11 *" "$salida"
 
 # 5. uso-claude.sh sin credenciales sale con 1 y emite mensaje a stderr
 empty_dir=$(mktemp -d)
@@ -59,5 +67,36 @@ if [ ! -s "$stderr_output" ]; then
     exit 1
 fi
 echo "OK [uso-claude sin credenciales]: exit code 1 y error en stderr ('$(cat "$stderr_output")')"
+
+# F08: Validación de respuesta de API en uso-claude.sh
+test_mock_dir=$(mktemp -d)
+trap 'rm -rf "$empty_dir" "$stderr_output" "$test_mock_dir"' EXIT
+
+mkdir -p "$test_mock_dir/bin" "$test_mock_dir/creds"
+cat << 'EOF' > "$test_mock_dir/bin/curl"
+#!/bin/bash
+cat >/dev/null
+cat "$TEST_API_RESPONSE"
+EOF
+chmod +x "$test_mock_dir/bin/curl"
+echo '{"claudeAiOauth":{"accessToken":"TEST_TOKEN"}}' > "$test_mock_dir/creds/.credentials.json"
+
+for invalid_payload in \
+  '{"five_hour":{"utilization":-1,"resets_at":"2026-11-05T16:00:00Z"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}' \
+  '{"five_hour":{"utilization":200,"resets_at":"2026-11-05T16:00:00Z"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}' \
+  '{"five_hour":{"utilization":"bad","resets_at":"2026-11-05T16:00:00Z"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}' \
+  '{"five_hour":{"utilization":50,"resets_at":"tomorrow"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}' \
+  '{"five_hour":{"utilization":50,"resets_at":"2026-11-05"},"seven_day":{"utilization":30,"resets_at":"2026-11-12T16:00:00Z"}}'; do
+  echo "$invalid_payload" > "$test_mock_dir/resp.json"
+  set +e
+  out=$(PATH="$test_mock_dir/bin:$PATH" CLAUDE_CONFIG_DIR="$test_mock_dir/creds" TEST_API_RESPONSE="$test_mock_dir/resp.json" "$USO_CLAUDE" 2>&1)
+  code=$?
+  set -e
+  if [ "$code" -eq 0 ]; then
+    echo "FAIL [F08 api validation]: se esperaba error para $invalid_payload pero salió 0 con: $out" >&2
+    exit 1
+  fi
+done
+echo "OK [F08 api validation]: todas las respuestas corruptas de la API fueron rechazadas con error"
 
 echo "Todos los tests de cron-despertar y uso-claude pasaron correctamente."

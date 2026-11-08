@@ -34,9 +34,10 @@ else
 
     # Si la hora suelta ya pasó hoy, programar para el día siguiente
     if [ "$epoch" -le "$now_epoch" ]; then
-        epoch=$(date -d "$today_date $hora_input + 1 day" +%s 2>/dev/null)
-        sec=$(date -d "$today_date $hora_input + 1 day" +%S 2>/dev/null)
-        nsec=$(date -d "$today_date $hora_input + 1 day" +%N 2>/dev/null)
+        tomorrow_date=$(date -d "$today_date + 1 day" +%Y-%m-%d 2>/dev/null)
+        epoch=$(date -d "$tomorrow_date $hora_input" +%s 2>/dev/null)
+        sec=$(date -d "$tomorrow_date $hora_input" +%S 2>/dev/null)
+        nsec=$(date -d "$tomorrow_date $hora_input" +%N 2>/dev/null)
     fi
 fi
 
@@ -45,8 +46,8 @@ if [ "$((10#$sec))" -gt 0 ] || [[ "$nsec" =~ [1-9] ]]; then
     epoch=$(( (epoch / 60 + 1) * 60 ))
 fi
 
-# Sumar margen en minutos
-epoch=$(( epoch + margen_min * 60 ))
+# Sumar margen en minutos (usando base 10 explícita para evitar errores con ceros a la izquierda)
+epoch=$(( epoch + 10#$margen_min * 60 ))
 
 # Salida en formato cron local: M H D Mon *
 date -d "@$epoch" +"%-M %-H %-d %-m *"
