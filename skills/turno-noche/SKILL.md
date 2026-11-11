@@ -18,7 +18,7 @@ Adelanta trabajo aprobado y entregas autónomas sin el usuario presente, aisland
    - **Apagar la PC al terminar:** preguntar siempre (día o noche).
    - Tope de gasto si hay pruebas pagas; si no, `sin gasto`.
 3. **Chequeo de viabilidad:** antes de que el usuario se vaya, verificar:
-   - Workers: probar respuesta en Orca (`ORCA="${ORCA_CLI_COMMAND:-orca-ide}"`). Si Codex muestra "Hooks need review", avisar para destrabarlo antes de irse.
+   - Workers: probar respuesta en Orca (`ORCA="${ORCA_CLI_COMMAND:-orca-ide}"`). Si Codex muestra "Hooks need review", relanzarlo con el bypass de hooks como indica `CLAUDE.md`; si sigue trabado, avisar antes de que el usuario se vaya.
    - Checks: correr tests o linter en rama base (debe partir verde).
    - Permisos: verificar que las herramientas no pidan confirmación.
    - Tokens: chequear margen semanal con `~/.claude/skills/despertador-limite/scripts/uso-claude.sh`; avisar si no hay margen.
